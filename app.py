@@ -44,7 +44,7 @@ with st.sidebar:
     # Household Members Management
     with st.expander("👥 Manage Household Members"):
         new_person = st.text_input("New Member Name", key="input_new_person")
-        if st.button("Add Member", key="btn_add_person", icon=":material/person_add:"):
+        if st.button("Add Member", key="btn_add_person", icon=":material/person:"):
             if new_person.strip():
                 db.add_person(new_person.strip())
                 st.success(f"Added member '{new_person.strip()}'!")
@@ -54,7 +54,7 @@ with st.sidebar:
     with st.expander("🏷️ Manage Custom Categories"):
         cat_name = st.text_input("Category Name", key="input_new_cat")
         cat_type = st.radio("Category Type", ["Bill / Expense", "Savings Goal"], horizontal=True)
-        if st.button("Add Category", key="btn_add_cat", icon=":material/label_add:"):
+        if st.button("Add Category", key="btn_add_cat", icon=":material/label:"):
             if cat_name.strip():
                 type_key = "bill" if "Bill" in cat_type else "savings"
                 db.add_category(cat_name.strip(), type_key)
