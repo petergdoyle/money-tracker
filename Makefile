@@ -19,8 +19,8 @@ dev-up: setup
 	@if [ -f .streamlit.pid ]; then \
 		echo "Streamlit is already running (PID: $$(cat .streamlit.pid))"; \
 	else \
-		nohup $(STREAMLIT) run app.py > streamlit.log 2>&1 & echo $$! > .streamlit.pid; \
-		echo "Streamlit started in the background (PID: $$(cat .streamlit.pid)). Logs at streamlit.log"; \
+		nohup $(STREAMLIT) run app.py --server.port=8220 > streamlit.log 2>&1 & echo $$! > .streamlit.pid; \
+		echo "Streamlit started in the background on port 8220 (PID: $$(cat .streamlit.pid)). Logs at streamlit.log"; \
 	fi
 
 dev-down:

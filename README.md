@@ -25,7 +25,7 @@ make setup
 ```bash
 make dev-up
 ```
-Access the application in your browser at: **`http://localhost:8501`**
+Access the application in your browser at: **`http://localhost:8220`**
 
 ### 3. Check Status or Stop
 ```bash

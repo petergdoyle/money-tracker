@@ -6,7 +6,7 @@ services:
     container_name: money-tracker
     restart: unless-stopped
     ports:
-      - "8501:8501"
+      - "8220:8220"
     volumes:
       - ./data:/app/data
     environment:
