@@ -248,9 +248,37 @@ with tab_bills:
                     if b['auto_pay']:
                         c2.caption("⚡ Auto-Pay Active")
                     
-                    if c3.button("Delete", key=f"del_bill_{b['id']}", icon=":material/delete:"):
-                        db.delete_record("bills", b['id'])
-                        st.rerun()
+                    with c3:
+                        with st.popover("Edit", icon=":material/edit:"):
+                            edit_name = st.text_input("Name", value=b['name'], key=f"eb_name_{b['id']}")
+                            edit_amount = st.number_input("Amount ($)", value=float(b['amount']), min_value=0.0, step=5.0, key=f"eb_amt_{b['id']}")
+                            edit_due = st.number_input("Due Day", value=int(b['due_day']), min_value=1, max_value=31, key=f"eb_due_{b['id']}")
+                            
+                            freq_opts = ["Monthly", "Bi-Weekly", "Annual"]
+                            edit_freq = st.selectbox("Frequency", freq_opts, index=freq_opts.index(b.get('frequency', 'Monthly')) if b.get('frequency') in freq_opts else 0, key=f"eb_freq_{b['id']}")
+                            
+                            edit_cat = st.selectbox("Category", bill_categories, index=bill_categories.index(b.get('category', 'General')) if b.get('category') in bill_categories else 0, key=f"eb_cat_{b['id']}")
+                            edit_owner = st.selectbox("Owner", people_list, index=people_list.index(b.get('owner', 'Shared / Household')) if b.get('owner') in people_list else 0, key=f"eb_own_{b['id']}")
+                            
+                            pm_opts = ["ACH / Checking Account", "Credit Card", "Debit Card", "Manual Check / Cash"]
+                            edit_pm = st.selectbox("Payment Method", pm_opts, index=pm_opts.index(b.get('payment_method', 'ACH / Checking Account')) if b.get('payment_method') in pm_opts else 0, key=f"eb_pm_{b['id']}")
+                            edit_pd = st.text_input("Payment Details", value=b.get('payment_detail', ''), key=f"eb_pd_{b['id']}")
+                            
+                            edit_autopay = st.checkbox("Auto-Pay Enabled", value=bool(b.get('auto_pay', 0)), key=f"eb_auto_{b['id']}")
+                            edit_active = st.checkbox("Active Bill", value=bool(b.get('is_active', 1)), key=f"eb_act_{b['id']}")
+
+                            if st.button("Save Changes", key=f"save_bill_{b['id']}"):
+                                db.update_bill(
+                                    b['id'], edit_name, edit_amount, edit_due, edit_freq, edit_cat,
+                                    1 if edit_autopay else 0, owner=edit_owner, payment_method=edit_pm,
+                                    payment_detail=edit_pd, is_active=1 if edit_active else 0
+                                )
+                                st.success("Bill updated!")
+                                st.rerun()
+
+                        if st.button("Delete", key=f"del_bill_{b['id']}", icon=":material/delete:"):
+                            db.delete_record("bills", b['id'])
+                            st.rerun()
         else:
             st.info("No recurring bills recorded for this perspective.")
 
@@ -281,9 +309,30 @@ with tab_bills:
                     ic1.markdown(f"**{inc['source']}**  \n`:material/update:` {inc['frequency']} | Next: `{inc['next_paydate']}`{owner_tag}")
                     ic2.markdown(f"### ${inc['amount']:,.2f}")
 
-                    if ic3.button("Delete", key=f"del_inc_{inc['id']}", icon=":material/delete:"):
-                        db.delete_record("income", inc['id'])
-                        st.rerun()
+                    with ic3:
+                        with st.popover("Edit", icon=":material/edit:"):
+                            edit_src = st.text_input("Source", value=inc['source'], key=f"ei_src_{inc['id']}")
+                            edit_inc_amt = st.number_input("Amount ($)", value=float(inc['amount']), min_value=0.0, step=50.0, key=f"ei_amt_{inc['id']}")
+                            
+                            freq_list = ["Bi-Weekly", "Weekly", "Semi-Monthly", "Monthly"]
+                            edit_inc_freq = st.selectbox("Frequency", freq_list, index=freq_list.index(inc.get('frequency', 'Bi-Weekly')) if inc.get('frequency') in freq_list else 0, key=f"ei_freq_{inc['id']}")
+                            
+                            try:
+                                curr_date = datetime.strptime(inc['next_paydate'], "%Y-%m-%d").date()
+                            except (ValueError, TypeError):
+                                curr_date = date.today()
+                                
+                            edit_inc_date = st.date_input("Next Paydate", value=curr_date, key=f"ei_date_{inc['id']}")
+                            edit_inc_own = st.selectbox("Owner", people_list, index=people_list.index(inc.get('owner', 'Shared / Household')) if inc.get('owner') in people_list else 0, key=f"ei_own_{inc['id']}")
+
+                            if st.button("Save Changes", key=f"save_inc_{inc['id']}"):
+                                db.update_income(inc['id'], edit_src, edit_inc_amt, edit_inc_freq, edit_inc_date.isoformat(), owner=edit_inc_own)
+                                st.success("Income source updated!")
+                                st.rerun()
+
+                        if st.button("Delete", key=f"del_inc_{inc['id']}", icon=":material/delete:"):
+                            db.delete_record("income", inc['id'])
+                            st.rerun()
         else:
             st.info("No income sources recorded for this perspective.")
 

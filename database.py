@@ -293,6 +293,16 @@ def add_income(source, amount, frequency, next_paydate, owner="Shared / Househol
     conn.commit()
     conn.close()
 
+def update_income(income_id, source, amount, frequency, next_paydate, owner="Shared / Household"):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    UPDATE income SET source=?, amount=?, frequency=?, next_paydate=?, owner=?
+    WHERE id=?
+    """, (source, amount, frequency, next_paydate, owner, income_id))
+    conn.commit()
+    conn.close()
+
 def add_savings_bucket(name, target_amount, current_balance, category, owner="Shared / Household", icon=":material/savings:"):
     conn = get_connection()
     cursor = conn.cursor()
@@ -300,6 +310,16 @@ def add_savings_bucket(name, target_amount, current_balance, category, owner="Sh
     INSERT INTO savings_buckets (name, target_amount, current_balance, category, owner, icon)
     VALUES (?, ?, ?, ?, ?, ?)
     """, (name, target_amount, current_balance, category, owner, icon))
+    conn.commit()
+    conn.close()
+
+def update_savings_bucket(bucket_id, name, target_amount, current_balance, category, owner="Shared / Household", icon=":material/savings:"):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    UPDATE savings_buckets SET name=?, target_amount=?, current_balance=?, category=?, owner=?, icon=?
+    WHERE id=?
+    """, (name, target_amount, current_balance, category, owner, icon, bucket_id))
     conn.commit()
     conn.close()
 
