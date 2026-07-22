@@ -18,6 +18,30 @@ st.set_page_config(
 # Initialize database tables & migrations
 db.init_db()
 
+# --- Cross-Browser Modal Dialog for Delete Confirmation ---
+@st.dialog("⚠️ Confirm Deletion")
+def confirm_delete_dialog(table_name, record_id, record_name, display_title="Record"):
+    st.warning(f"Are you sure you want to delete **{record_name}** ({display_title})?")
+    st.markdown("This action **cannot be undone** and will permanently remove this record.")
+    
+    col_cancel, col_del = st.columns(2)
+    with col_cancel:
+        if st.button("Cancel", key=f"dlg_cancel_{table_name}_{record_id}", use_container_width=True):
+            if "delete_target" in st.session_state:
+                del st.session_state["delete_target"]
+            st.rerun()
+    with col_del:
+        if st.button("🔥 Yes, Delete", key=f"dlg_confirm_{table_name}_{record_id}", type="primary", use_container_width=True):
+            db.delete_record(table_name, record_id)
+            if "delete_target" in st.session_state:
+                del st.session_state["delete_target"]
+            st.success(f"Deleted '{record_name}'!")
+            st.rerun()
+
+if "delete_target" in st.session_state:
+    target_table, target_id, target_name, target_type = st.session_state["delete_target"]
+    confirm_delete_dialog(target_table, target_id, target_name, target_type)
+
 # --- Sidebar: Household Perspective & Admin ---
 with st.sidebar:
     st.title("🏡 Household Context")
@@ -41,13 +65,56 @@ with st.sidebar:
 
     st.markdown("---")
     
-    # Household Members Management
-    with st.expander("👥 Manage Household Members"):
-        new_person = st.text_input("New Member Name", key="input_new_person")
-        if st.button("Add Member", key="btn_add_person", icon=":material/person:"):
-            if new_person.strip():
-                db.add_person(new_person.strip())
-                st.success(f"Added member '{new_person.strip()}'!")
+    # Household Members & Contact Info Management
+    with st.expander("👥 Manage Household Members & Contacts"):
+        all_people_details = db.fetch_people_details()
+        
+        for p in all_people_details:
+            with st.container(border=True):
+                p_name = p['name']
+                p_email = p.get('email', '')
+                p_phone = p.get('phone', '')
+                p_notify = bool(p.get('notify_bills', 1))
+
+                st.markdown(f"**👤 {p_name}**")
+                if p_email or p_phone:
+                    email_str = f"📧 `{p_email}`" if p_email else ""
+                    phone_str = f"📱 `{p_phone}`" if p_phone else ""
+                    st.caption(f"{email_str} {phone_str}")
+                
+                notify_badge = "🔔 Bill Notifications ON" if p_notify else "🔕 Notifications OFF"
+                st.caption(notify_badge)
+
+                # Edit Member Details Popover
+                if p_name != "Shared / Household":
+                    with st.popover("Edit Contact Info", icon=":material/edit:"):
+                        ep_name = st.text_input("Name", value=p_name, key=f"ep_n_{p['id']}")
+                        ep_email = st.text_input("Email", value=p_email, key=f"ep_e_{p['id']}")
+                        ep_phone = st.text_input("Phone Number", value=p_phone, key=f"ep_p_{p['id']}")
+                        ep_notify = st.checkbox("Receive Bill Notifications", value=p_notify, key=f"ep_notif_{p['id']}")
+                        ep_notes = st.text_area("Notes", value=p.get('notes', ''), key=f"ep_notes_{p['id']}")
+
+                        if st.button("Save Member Changes", key=f"btn_save_p_{p['id']}"):
+                            db.update_person(p['id'], ep_name, ep_email, ep_phone, 1 if ep_notify else 0, ep_notes)
+                            st.success("Member details updated!")
+                            st.rerun()
+
+                    if st.button("Remove Member", key=f"btn_del_p_{p['id']}", icon=":material/delete:"):
+                        st.session_state["delete_target"] = ("people", p['id'], p_name, "Household Member")
+                        st.rerun()
+
+        st.markdown("---")
+        st.markdown("**➕ Add New Member**")
+        with st.form("add_person_form", clear_on_submit=True):
+            new_p_name = st.text_input("Member Name", placeholder="e.g. Aimee")
+            new_p_email = st.text_input("Email Address", placeholder="aimee@example.com")
+            new_p_phone = st.text_input("Phone Number", placeholder="(555) 123-4567")
+            new_p_notify = st.checkbox("Receive Bill Notifications", value=True)
+            new_p_submit = st.form_submit_button("Add Member", icon=":material/person_add:")
+
+            if new_p_submit and new_p_name.strip():
+                db.add_person(new_p_name.strip(), new_p_email, new_p_phone, 1 if new_p_notify else 0)
+                st.success(f"Added member '{new_p_name.strip()}'!")
                 st.rerun()
 
     # Custom Category Management
@@ -622,7 +689,7 @@ with tab_accounts:
                             st.rerun()
 
                     if st.button("Delete Account", key=f"del_ba_{ba['id']}", icon=":material/delete:"):
-                        db.delete_record("bank_accounts", ba['id'])
+                        st.session_state["delete_target"] = ("bank_accounts", ba['id'], ba['name'], "Bank Account")
                         st.rerun()
     else:
         st.info("No bank accounts recorded for this perspective.")
@@ -769,7 +836,7 @@ with tab_cards:
                             st.rerun()
 
                     if st.button("Delete Card", key=f"del_card_{card['id']}", icon=":material/delete:"):
-                        db.delete_record("cards", card['id'])
+                        st.session_state["delete_target"] = ("cards", card['id'], card['name'], "Credit Card")
                         st.rerun()
     else:
         st.info("No credit cards recorded for this perspective.")
@@ -873,7 +940,7 @@ with tab_bills:
                                 st.rerun()
 
                         if st.button("Delete", key=f"del_bill_{b['id']}", icon=":material/delete:"):
-                            db.delete_record("bills", b['id'])
+                            st.session_state["delete_target"] = ("bills", b['id'], b['name'], "Bill")
                             st.rerun()
         else:
             st.info("No recurring bills recorded for this perspective.")
@@ -927,7 +994,7 @@ with tab_bills:
                                 st.rerun()
 
                         if st.button("Delete", key=f"del_inc_{inc['id']}", icon=":material/delete:"):
-                            db.delete_record("income", inc['id'])
+                            st.session_state["delete_target"] = ("income", inc['id'], inc['source'], "Income Source")
                             st.rerun()
         else:
             st.info("No income sources recorded for this perspective.")
@@ -1014,7 +1081,7 @@ with tab_savings:
                                 st.rerun()
 
                     if st.button("Delete Bucket", key=f"del_bucket_{bucket['id']}", icon=":material/delete:"):
-                        db.delete_record("savings_buckets", bucket['id'])
+                        st.session_state["delete_target"] = ("savings_buckets", bucket['id'], bucket['name'], "Savings Bucket")
                         st.rerun()
     else:
         st.info("No savings buckets recorded for this perspective.")

@@ -19,7 +19,11 @@ def init_db():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS people (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT UNIQUE NOT NULL
+        name TEXT UNIQUE NOT NULL,
+        email TEXT DEFAULT '',
+        phone TEXT DEFAULT '',
+        notify_bills INTEGER DEFAULT 1,
+        notes TEXT DEFAULT ''
     )
     """)
 
@@ -144,6 +148,18 @@ def init_db():
     if "bank_account_id" not in bucket_cols:
         cursor.execute("ALTER TABLE savings_buckets ADD COLUMN bank_account_id INTEGER DEFAULT NULL")
 
+    # Migration check for people table contact details
+    cursor.execute("PRAGMA table_info(people)")
+    people_cols = [c[1] for c in cursor.fetchall()]
+    if "email" not in people_cols:
+        cursor.execute("ALTER TABLE people ADD COLUMN email TEXT DEFAULT ''")
+    if "phone" not in people_cols:
+        cursor.execute("ALTER TABLE people ADD COLUMN phone TEXT DEFAULT ''")
+    if "notify_bills" not in people_cols:
+        cursor.execute("ALTER TABLE people ADD COLUMN notify_bills INTEGER DEFAULT 1")
+    if "notes" not in people_cols:
+        cursor.execute("ALTER TABLE people ADD COLUMN notes TEXT DEFAULT ''")
+
     conn.commit()
 
     # Seed initial data if empty
@@ -249,10 +265,31 @@ def fetch_people():
         people.insert(0, "Shared / Household")
     return people
 
-def add_person(name):
+def fetch_people_details():
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("INSERT OR IGNORE INTO people (name) VALUES (?)", (name.strip(),))
+    cursor.execute("SELECT * FROM people ORDER BY id ASC")
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+def add_person(name, email="", phone="", notify_bills=1, notes=""):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    INSERT OR IGNORE INTO people (name, email, phone, notify_bills, notes)
+    VALUES (?, ?, ?, ?, ?)
+    """, (name.strip(), email.strip(), phone.strip(), 1 if notify_bills else 0, notes.strip()))
+    conn.commit()
+    conn.close()
+
+def update_person(person_id, name, email="", phone="", notify_bills=1, notes=""):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    UPDATE people SET name=?, email=?, phone=?, notify_bills=?, notes=?
+    WHERE id=?
+    """, (name.strip(), email.strip(), phone.strip(), 1 if notify_bills else 0, notes.strip(), person_id))
     conn.commit()
     conn.close()
 
