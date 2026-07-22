@@ -952,17 +952,48 @@ with tab_cards:
                                     st.success(f"Linked '{target_cb['name']}' to {card['name']}!")
                                     st.rerun()
 
-                    # Balance update popover
-                    with st.popover("Edit Balance / Details", icon=":material/edit:"):
-                        new_bal = st.number_input("Update Balance ($)", value=float(card['balance']), key=f"nb_{card['id']}")
-                        new_limit = st.number_input("Update Limit ($)", value=float(card['limit_amount']), key=f"nl_{card['id']}")
-                        new_card_owner = st.selectbox("Card Owner", people_list, index=people_list.index(card.get('owner', 'Shared / Household')) if card.get('owner') in people_list else 0, key=f"no_{card['id']}")
+                    # Edit Card Details Popover
+                    with st.popover("Edit Card Details", icon=":material/edit:"):
+                        raw_cname = card['name']
+                        curr_cname = raw_cname
+                        curr_clast4 = ""
+                        if "(..." in raw_cname and raw_cname.endswith(")"):
+                            parts = raw_cname.rsplit(" (...", 1)
+                            curr_cname = parts[0]
+                            curr_clast4 = parts[1].replace(")", "")
+
+                        edit_cname = st.text_input("Card Name", value=curr_cname, key=f"ec_name_{card['id']}")
+                        edit_clast4 = st.text_input("Last 4 Digits / Trailing #", value=curr_clast4, key=f"ec_l4_{card['id']}", help="Appends (...5637) to card name")
+                        edit_bal = st.number_input("Update Balance ($)", value=float(card['balance']), key=f"nb_{card['id']}")
+                        edit_limit = st.number_input("Update Limit ($)", value=float(card['limit_amount']), key=f"nl_{card['id']}")
+                        edit_apr = st.number_input("APR (%)", value=float(card['apr']), step=0.1, key=f"ec_apr_{card['id']}")
+                        edit_stmt = st.number_input("Statement Day", value=int(card['statement_day']), min_value=1, max_value=31, key=f"ec_stmt_{card['id']}")
+                        edit_due = st.number_input("Payment Due Day", value=int(card['due_day']), min_value=1, max_value=31, key=f"ec_due_{card['id']}")
+                        edit_min = st.number_input("Minimum Payment ($)", value=float(card['minimum_payment']), step=5.0, key=f"ec_min_{card['id']}")
+                        edit_card_owner = st.selectbox("Card Owner", people_list, index=people_list.index(card.get('owner', 'Shared / Household')) if card.get('owner') in people_list else 0, key=f"no_{card['id']}")
+
                         if st.button("Save Changes", key=f"save_card_{card['id']}"):
+                            final_edit_name = edit_cname.strip()
+                            if edit_clast4.strip():
+                                l4_clean = edit_clast4.strip().replace("...", "").replace("(", "").replace(")", "")
+                                if f"(...{l4_clean})" not in final_edit_name and l4_clean not in final_edit_name:
+                                    final_edit_name = f"{final_edit_name} (...{l4_clean})"
+
+                            old_card_name = card['name']
                             db.update_card(
-                                card['id'], card['name'], new_bal, new_limit, 
-                                card['apr'], card['statement_day'], card['due_day'], card['minimum_payment'], owner=new_card_owner
+                                card['id'], final_edit_name, edit_bal, edit_limit, 
+                                edit_apr, edit_stmt, edit_due, edit_min, owner=edit_card_owner
                             )
-                            db.log_transaction("Card Update", new_bal, f"Updated balance for {card['name']}", card['name'], owner=new_card_owner)
+
+                            # Cascading update for linked bills if card name changed
+                            if old_card_name != final_edit_name:
+                                conn = db.get_connection()
+                                conn.execute("UPDATE bills SET payment_detail=? WHERE payment_method='Credit Card' AND payment_detail=?", (final_edit_name, old_card_name))
+                                conn.commit()
+                                conn.close()
+
+                            db.log_transaction("Card Update", edit_bal, f"Updated details for {final_edit_name}", final_edit_name, owner=edit_card_owner)
+                            st.success(f"Updated card '{final_edit_name}'!")
                             st.rerun()
 
                     if st.button("Delete Card", key=f"del_card_{card['id']}", icon=":material/delete:"):
