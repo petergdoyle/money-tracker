@@ -394,6 +394,102 @@ def parse_bank_account_upload(uploaded_file, default_owner="Shared / Household")
 
     return accounts_to_add, None
 
+# --- File Parser for Income Uploads ---
+def parse_income_upload(uploaded_file, default_owner="Shared / Household"):
+    try:
+        filename = uploaded_file.name.lower()
+        if filename.endswith(".csv"):
+            df = pd.read_csv(uploaded_file)
+        elif filename.endswith(".xlsx") or filename.endswith(".xls"):
+            df = pd.read_excel(uploaded_file)
+        else:
+            return None, "Unsupported file format. Please upload a CSV or Excel file (.csv, .xlsx, .xls)."
+    except Exception as e:
+        return None, f"Failed to parse file: {str(e)}"
+
+    if df.empty:
+        return None, "Uploaded file contains no data rows."
+
+    # Standardize column headers
+    df.columns = [str(c).strip().lower().replace("_", " ") for c in df.columns]
+
+    income_to_add = []
+    for idx, row in df.iterrows():
+        # Source
+        src_val = None
+        for col in ["source", "income source", "name", "label", "paycheck"]:
+            if col in row and pd.notna(row[col]):
+                src_val = str(row[col]).strip()
+                break
+        
+        if not src_val:
+            continue
+
+        # Amount
+        amt_val = 0.0
+        for col in ["amount", "paycheck amount", "amount per paycheck", "salary", "pay"]:
+            if col in row and pd.notna(row[col]):
+                try:
+                    cleaned_str = str(row[col]).replace("$", "").replace(",", "").strip()
+                    amt_val = float(cleaned_str)
+                except ValueError:
+                    amt_val = 0.0
+                break
+
+        # Frequency
+        freq_val = "Bi-Weekly"
+        for col in ["frequency", "freq", "pay frequency"]:
+            if col in row and pd.notna(row[col]):
+                freq_val = str(row[col]).strip()
+                break
+
+        # Next Paydate
+        paydate_val = date.today().isoformat()
+        for col in ["next paydate", "paydate", "next pay", "date"]:
+            if col in row and pd.notna(row[col]):
+                try:
+                    dt = pd.to_datetime(row[col]).date()
+                    paydate_val = dt.isoformat()
+                except Exception:
+                    paydate_val = date.today().isoformat()
+                break
+
+        # Target Bank Account
+        bank_acct_val = ""
+        for col in ["target bank account", "bank account", "deposit account", "bank"]:
+            if col in row and pd.notna(row[col]):
+                bank_acct_val = str(row[col]).strip()
+                break
+
+        # Custom Days
+        custom_days_val = ""
+        for col in ["custom days", "days", "custom schedule", "pay days"]:
+            if col in row and pd.notna(row[col]):
+                custom_days_val = str(row[col]).strip()
+                break
+
+        # Owner
+        owner_val = default_owner
+        for col in ["owner", "person", "member", "assigned to"]:
+            if col in row and pd.notna(row[col]):
+                owner_val = str(row[col]).strip()
+                break
+
+        income_to_add.append({
+            "source": src_val,
+            "amount": amt_val,
+            "frequency": freq_val,
+            "next_paydate": paydate_val,
+            "bank_account_name": bank_acct_val,
+            "custom_days": custom_days_val,
+            "owner": owner_val
+        })
+
+    if not income_to_add:
+        return None, "No valid income rows found. Ensure the spreadsheet contains a column header for 'Source' or 'Income Source'."
+
+    return income_to_add, None
+
 # --- Fetch Data & Apply Filter ---
 raw_accounts = db.fetch_all("bank_accounts")
 raw_cards = db.fetch_all("cards")
@@ -646,6 +742,27 @@ with tab_accounts:
                                         ab['id'], ab['name'], ab['amount'], ab['due_day'], ab['frequency'], ab['category'],
                                         ab['auto_pay'], owner=ab.get('owner', 'Shared / Household'),
                                         payment_method="ACH / Checking Account", payment_detail="", is_active=ab.get('is_active', 1)
+                                    )
+                                    st.rerun()
+
+                    # Linked Direct Deposit Income Sources
+                    linked_direct_deposits = [
+                        inc for inc in raw_income 
+                        if inc.get("bank_account_name") == ba["name"] or
+                        (inc.get("bank_account_name") and ba["name"].lower() in inc.get("bank_account_name").lower())
+                    ]
+                    income_monthly_total = sum(inc["amount"] for inc in linked_direct_deposits)
+
+                    with st.expander(f"💵 Linked Direct Deposit Income ({len(linked_direct_deposits)}) - ${income_monthly_total:,.2f}/paycheck", expanded=True if linked_direct_deposits else False):
+                        if linked_direct_deposits:
+                            for dd in linked_direct_deposits:
+                                d_col1, d_col2 = st.columns([3, 1])
+                                c_days_str = f" (`{dd['custom_days']}`)" if dd.get("custom_days") else ""
+                                d_col1.markdown(f"• **{dd['source']}** - `${dd['amount']:,.2f}` ({dd['frequency']}{c_days_str} | 👤 `{dd.get('owner', 'Shared')}`)")
+                                if d_col2.button("Unlink", key=f"unlink_dd_{ba['id']}_{dd['id']}", icon=":material/link_off:"):
+                                    db.update_income(
+                                        dd['id'], dd['source'], dd['amount'], dd['frequency'], dd['next_paydate'],
+                                        owner=dd.get('owner', 'Shared / Household'), bank_account_name="", custom_days=dd.get('custom_days', '')
                                     )
                                     st.rerun()
                         else:
@@ -949,19 +1066,71 @@ with tab_bills:
         st.subheader("Income & Paydays")
 
         with st.container(border=True):
-            with st.expander("➕ Add Income Source", expanded=False):
-                with st.form("add_income_form", clear_on_submit=True):
-                    source = st.text_input("Income Source", placeholder="e.g. Primary Paycheck")
-                    inc_amount = st.number_input("Amount per Paycheck ($)", min_value=0.0, step=50.0)
-                    inc_freq = st.selectbox("Frequency", ["Bi-Weekly", "Weekly", "Semi-Monthly", "Monthly"])
-                    next_pay = st.date_input("Next Paydate", value=date.today())
-                    inc_owner = st.selectbox("Assign to Person", people_list)
-                    inc_submitted = st.form_submit_button("Save Income Source", icon=":material/add:")
+            col_add_inc, col_imp_inc = st.columns(2)
 
-                    if inc_submitted and source and inc_amount > 0:
-                        db.add_income(source, inc_amount, inc_freq, next_pay.isoformat(), owner=inc_owner)
-                        st.success(f"Added income '{source}' for {inc_owner}!")
-                        st.rerun()
+            with col_add_inc:
+                with st.expander("➕ Add Single Income Source", expanded=False):
+                    with st.form("add_income_form", clear_on_submit=True):
+                        source = st.text_input("Income Source", placeholder="e.g. Primary Paycheck")
+                        inc_amount = st.number_input("Amount per Paycheck ($)", min_value=0.0, step=50.0)
+                        
+                        freq_options = ["Bi-Weekly", "Weekly", "Semi-Monthly", "Monthly", "Twice a Month (Custom Days)", "Custom / Flex Schedule"]
+                        inc_freq = st.selectbox("Frequency", freq_options)
+                        inc_custom_days = st.text_input("Custom Pay Days / Schedule", placeholder="e.g. 1, 15 or 15th & 30th", help="Used when frequency is set to Twice a Month or Custom")
+                        
+                        bank_account_names = [ba["name"] for ba in raw_accounts]
+                        inc_bank = st.selectbox("Target Bank Account (Direct Deposit)", ["-- Unlinked / Manual --"] + bank_account_names)
+                        
+                        next_pay = st.date_input("Next Paydate", value=date.today())
+                        inc_owner = st.selectbox("Assign to Person", people_list)
+                        inc_submitted = st.form_submit_button("Save Income Source", icon=":material/add:")
+
+                        if inc_submitted and source and inc_amount > 0:
+                            target_ba = "" if inc_bank == "-- Unlinked / Manual --" else inc_bank
+                            db.add_income(source, inc_amount, inc_freq, next_pay.isoformat(), owner=inc_owner, bank_account_name=target_ba, custom_days=inc_custom_days)
+                            st.success(f"Added income '{source}' for {inc_owner}!")
+                            st.rerun()
+
+            with col_imp_inc:
+                with st.expander("📥 Import Income (CSV / Excel)", expanded=False):
+                    st.markdown("Upload a CSV or Excel spreadsheet to import multiple income sources.")
+                    
+                    sample_inc_csv = "Source,Amount,Frequency,Next Paydate,Target Bank Account,Custom Days,Owner\nPeter Paycheck,3200.00,Bi-Weekly,2026-08-01,Primary Checking,,Peter\nPartner Salary,2800.00,Twice a Month (Custom Days),2026-08-01,High-Yield Savings,\"1, 15\",Aimee\n"
+                    st.download_button(
+                        "📥 Download CSV Template",
+                        data=sample_inc_csv,
+                        file_name="income_sources_template.csv",
+                        mime="text/csv",
+                        key="btn_dl_inc_template"
+                    )
+
+                    uploaded_inc_file = st.file_uploader("Upload CSV or Excel File", type=["csv", "xlsx", "xls"], key="inc_file_uploader")
+                    
+                    if uploaded_inc_file is not None:
+                        def_inc_owner = active_person if active_person != "ALL" else "Shared / Household"
+                        parsed_income, parse_inc_error = parse_income_upload(uploaded_inc_file, default_owner=def_inc_owner)
+                        
+                        if parse_inc_error:
+                            st.error(parse_inc_error)
+                        elif parsed_income:
+                            st.success(f"Parsed {len(parsed_income)} income source(s)!")
+                            df_inc_preview = pd.DataFrame(parsed_income)
+                            st.dataframe(df_inc_preview, use_container_width=True, hide_index=True)
+
+                            if st.button("Import Income Now", key="btn_confirm_inc_import", icon=":material/file_upload:"):
+                                count_inc_added = 0
+                                for inc_item in parsed_income:
+                                    owner_name = inc_item.get("owner") or def_inc_owner
+                                    if owner_name and owner_name not in people_list:
+                                        db.add_person(owner_name)
+                                    
+                                    db.add_income(
+                                        inc_item["source"], inc_item["amount"], inc_item["frequency"], inc_item["next_paydate"],
+                                        owner=owner_name, bank_account_name=inc_item.get("bank_account_name", ""), custom_days=inc_item.get("custom_days", "")
+                                    )
+                                    count_inc_added += 1
+                                st.success(f"Successfully imported {count_inc_added} income source(s)!")
+                                st.rerun()
 
         # Display Income Sources
         if income_sources:
@@ -969,7 +1138,10 @@ with tab_bills:
                 with st.container(border=True):
                     ic1, ic2, ic3 = st.columns([3, 2, 1])
                     owner_tag = f" | 👤 `{inc.get('owner', 'Shared / Household')}`"
-                    ic1.markdown(f"**{inc['source']}**  \n`:material/update:` {inc['frequency']} | Next: `{inc['next_paydate']}`{owner_tag}")
+                    ba_tag = f" | 🏦 `{inc.get('bank_account_name')}`" if inc.get("bank_account_name") else ""
+                    custom_days_tag = f" (`{inc.get('custom_days')}`)" if inc.get("custom_days") else ""
+
+                    ic1.markdown(f"**{inc['source']}**  \n`:material/update:` {inc['frequency']}{custom_days_tag} | Next: `{inc['next_paydate']}`{owner_tag}{ba_tag}")
                     ic2.markdown(f"### ${inc['amount']:,.2f}")
 
                     with ic3:
@@ -977,8 +1149,13 @@ with tab_bills:
                             edit_src = st.text_input("Source", value=inc['source'], key=f"ei_src_{inc['id']}")
                             edit_inc_amt = st.number_input("Amount ($)", value=float(inc['amount']), min_value=0.0, step=50.0, key=f"ei_amt_{inc['id']}")
                             
-                            freq_list = ["Bi-Weekly", "Weekly", "Semi-Monthly", "Monthly"]
+                            freq_list = ["Bi-Weekly", "Weekly", "Semi-Monthly", "Monthly", "Twice a Month (Custom Days)", "Custom / Flex Schedule"]
                             edit_inc_freq = st.selectbox("Frequency", freq_list, index=freq_list.index(inc.get('frequency', 'Bi-Weekly')) if inc.get('frequency') in freq_list else 0, key=f"ei_freq_{inc['id']}")
+                            edit_inc_cdays = st.text_input("Custom Pay Days / Schedule", value=inc.get('custom_days', ''), key=f"ei_cdays_{inc['id']}")
+                            
+                            bank_account_names = [ba["name"] for ba in raw_accounts]
+                            curr_inc_ba = inc.get('bank_account_name', '')
+                            edit_inc_ba = st.selectbox("Target Bank Account", ["-- Unlinked / Manual --"] + bank_account_names, index=bank_account_names.index(curr_inc_ba) + 1 if curr_inc_ba in bank_account_names else 0, key=f"ei_ba_{inc['id']}")
                             
                             try:
                                 curr_date = datetime.strptime(inc['next_paydate'], "%Y-%m-%d").date()
@@ -989,7 +1166,8 @@ with tab_bills:
                             edit_inc_own = st.selectbox("Owner", people_list, index=people_list.index(inc.get('owner', 'Shared / Household')) if inc.get('owner') in people_list else 0, key=f"ei_own_{inc['id']}")
 
                             if st.button("Save Changes", key=f"save_inc_{inc['id']}"):
-                                db.update_income(inc['id'], edit_src, edit_inc_amt, edit_inc_freq, edit_inc_date.isoformat(), owner=edit_inc_own)
+                                target_ba_save = "" if edit_inc_ba == "-- Unlinked / Manual --" else edit_inc_ba
+                                db.update_income(inc['id'], edit_src, edit_inc_amt, edit_inc_freq, edit_inc_date.isoformat(), owner=edit_inc_own, bank_account_name=target_ba_save, custom_days=edit_inc_cdays)
                                 st.success("Income source updated!")
                                 st.rerun()
 

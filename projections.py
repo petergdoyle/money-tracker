@@ -34,7 +34,7 @@ def calculate_cashflow_projection(starting_balance, bills, income_sources, days_
                 curr_pay += timedelta(weeks=1)
             elif freq == "Bi-Weekly":
                 curr_pay += timedelta(weeks=2)
-            elif freq == "Semi-Monthly":
+            elif "Semi-Monthly" in freq or "Twice" in freq:
                 curr_pay += timedelta(days=15)
             elif freq == "Monthly":
                 # Advance 1 month
@@ -43,7 +43,8 @@ def calculate_cashflow_projection(starting_balance, bills, income_sources, days_
                 day = min(curr_pay.day, 28)
                 curr_pay = date(year, month, day)
             else:
-                break
+                # Custom / Flex -> default advance 14 days
+                curr_pay += timedelta(days=14)
 
     # 2. Project Recurring Bills
     for bill in bills:

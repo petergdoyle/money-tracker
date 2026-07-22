@@ -78,7 +78,9 @@ def init_db():
         amount REAL NOT NULL,
         frequency TEXT NOT NULL DEFAULT 'Bi-Weekly',
         next_paydate TEXT NOT NULL,
-        owner TEXT DEFAULT 'Shared / Household'
+        owner TEXT DEFAULT 'Shared / Household',
+        bank_account_name TEXT DEFAULT '',
+        custom_days TEXT DEFAULT ''
     )
     """)
 
@@ -160,6 +162,14 @@ def init_db():
     if "notes" not in people_cols:
         cursor.execute("ALTER TABLE people ADD COLUMN notes TEXT DEFAULT ''")
 
+    # Migration check for income table target bank account and custom frequency
+    cursor.execute("PRAGMA table_info(income)")
+    income_cols = [c[1] for c in cursor.fetchall()]
+    if "bank_account_name" not in income_cols:
+        cursor.execute("ALTER TABLE income ADD COLUMN bank_account_name TEXT DEFAULT ''")
+    if "custom_days" not in income_cols:
+        cursor.execute("ALTER TABLE income ADD COLUMN custom_days TEXT DEFAULT ''")
+
     conn.commit()
 
     # Seed initial data if empty
@@ -212,11 +222,11 @@ def seed_household_data(cursor):
 
     # Sample Income
     cursor.executemany("""
-    INSERT INTO income (source, amount, frequency, next_paydate, owner)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO income (source, amount, frequency, next_paydate, owner, bank_account_name, custom_days)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     """, [
-        ("Peter Paycheck", 3200.00, "Bi-Weekly", date.today().isoformat(), "Peter"),
-        ("Partner Salary", 2800.00, "Semi-Monthly", date.today().isoformat(), "Partner"),
+        ("Peter Paycheck", 3200.00, "Bi-Weekly", date.today().isoformat(), "Peter", "Primary Checking", ""),
+        ("Partner Salary", 2800.00, "Twice a Month (Custom Days)", date.today().isoformat(), "Partner", "High-Yield Savings", "1, 15"),
     ])
 
     # Sample Bank Accounts
@@ -355,23 +365,23 @@ def update_bill(bill_id, name, amount, due_day, frequency, category, auto_pay, o
     conn.commit()
     conn.close()
 
-def add_income(source, amount, frequency, next_paydate, owner="Shared / Household"):
+def add_income(source, amount, frequency, next_paydate, owner="Shared / Household", bank_account_name="", custom_days=""):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-    INSERT INTO income (source, amount, frequency, next_paydate, owner)
-    VALUES (?, ?, ?, ?, ?)
-    """, (source, amount, frequency, next_paydate, owner))
+    INSERT INTO income (source, amount, frequency, next_paydate, owner, bank_account_name, custom_days)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (source, amount, frequency, next_paydate, owner, bank_account_name, custom_days))
     conn.commit()
     conn.close()
 
-def update_income(income_id, source, amount, frequency, next_paydate, owner="Shared / Household"):
+def update_income(income_id, source, amount, frequency, next_paydate, owner="Shared / Household", bank_account_name="", custom_days=""):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-    UPDATE income SET source=?, amount=?, frequency=?, next_paydate=?, owner=?
+    UPDATE income SET source=?, amount=?, frequency=?, next_paydate=?, owner=?, bank_account_name=?, custom_days=?
     WHERE id=?
-    """, (source, amount, frequency, next_paydate, owner, income_id))
+    """, (source, amount, frequency, next_paydate, owner, bank_account_name, custom_days, income_id))
     conn.commit()
     conn.close()
 
