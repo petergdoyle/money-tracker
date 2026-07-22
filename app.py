@@ -638,8 +638,14 @@ with tab_accounts:
                     ba_submitted = st.form_submit_button("Save Bank Account", icon=":material/add:")
 
                     if ba_submitted and ba_name and ba_bank:
-                        db.add_bank_account(ba_name, ba_bank, ba_type, ba_acct_num, ba_routing, ba_balance, owner=ba_owner, notes=ba_notes)
-                        st.success(f"Added Bank Account '{ba_name}'!")
+                        final_ba_name = ba_name.strip()
+                        if ba_acct_num.strip():
+                            l4_b = ba_acct_num.strip().replace("...", "").replace("(", "").replace(")", "")
+                            if f"(...{l4_b})" not in final_ba_name and l4_b not in final_ba_name:
+                                final_ba_name = f"{final_ba_name} (...{l4_b})"
+
+                        db.add_bank_account(final_ba_name, ba_bank, ba_type, ba_acct_num, ba_routing, ba_balance, owner=ba_owner, notes=ba_notes)
+                        st.success(f"Added Bank Account '{final_ba_name}'!")
                         st.rerun()
 
         with col_imp_ba:
@@ -824,7 +830,8 @@ with tab_cards:
         with col_add_c:
             with st.expander("➕ Add Single Credit Card", expanded=False):
                 with st.form("add_card_form", clear_on_submit=True):
-                    card_name = st.text_input("Card Name", placeholder="e.g. Amex Gold")
+                    card_name = st.text_input("Card Name", placeholder="e.g. Chase Sapphire")
+                    card_last4 = st.text_input("Last 4 Digits / Trailing #", placeholder="e.g. 5637", help="Appends (...5637) to the card name")
                     card_balance = st.number_input("Current Balance ($)", min_value=0.0, step=10.0)
                     card_limit = st.number_input("Credit Limit ($)", min_value=1.0, step=100.0, value=5000.0)
                     card_apr = st.number_input("APR (%)", min_value=0.0, step=0.1, value=19.99)
@@ -836,8 +843,14 @@ with tab_cards:
                     card_submitted = st.form_submit_button("Save Credit Card", icon=":material/add:")
 
                     if card_submitted and card_name:
-                        db.add_card(card_name, card_balance, card_limit, card_apr, card_stmt_day, card_due_day, card_min_pay, owner=card_owner)
-                        st.success(f"Added card '{card_name}' for {card_owner}!")
+                        final_card_name = card_name.strip()
+                        if card_last4.strip():
+                            l4 = card_last4.strip().replace("...", "").replace("(", "").replace(")", "")
+                            if f"(...{l4})" not in final_card_name and l4 not in final_card_name:
+                                final_card_name = f"{final_card_name} (...{l4})"
+
+                        db.add_card(final_card_name, card_balance, card_limit, card_apr, card_stmt_day, card_due_day, card_min_pay, owner=card_owner)
+                        st.success(f"Added card '{final_card_name}' for {card_owner}!")
                         st.rerun()
 
         with col_imp_c:
