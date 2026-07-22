@@ -78,7 +78,22 @@ def init_db():
     )
     """)
 
-    # Savings Buckets Table
+    # Bank Accounts Table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS bank_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        bank_name TEXT NOT NULL,
+        account_type TEXT DEFAULT 'Checking',
+        account_number TEXT DEFAULT '',
+        routing_number TEXT DEFAULT '',
+        current_balance REAL DEFAULT 0.0,
+        owner TEXT DEFAULT 'Shared / Household',
+        notes TEXT
+    )
+    """)
+
+    # Savings Buckets Table (with Parent Bank Account link)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS savings_buckets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -87,7 +102,9 @@ def init_db():
         current_balance REAL NOT NULL DEFAULT 0.0,
         category TEXT NOT NULL DEFAULT 'General',
         icon TEXT DEFAULT ':material/savings:',
-        owner TEXT DEFAULT 'Shared / Household'
+        owner TEXT DEFAULT 'Shared / Household',
+        bank_account_id INTEGER DEFAULT NULL,
+        bank_account_name TEXT DEFAULT ''
     )
     """)
 
@@ -105,10 +122,10 @@ def init_db():
     """)
 
     # --- Safe Migration logic for adding owner column if upgrading DB ---
-    for table in ["cards", "bills", "income", "savings_buckets", "transactions"]:
+    for table in ["cards", "bills", "income", "savings_buckets", "transactions", "bank_accounts"]:
         cursor.execute(f"PRAGMA table_info({table})")
         cols = [c[1] for c in cursor.fetchall()]
-        if "owner" not in cols:
+        if "owner" not in cols and table != "bank_accounts":
             cursor.execute(f"ALTER TABLE {table} ADD COLUMN owner TEXT DEFAULT 'Shared / Household'")
 
     # Migration check for payment_method and payment_detail on bills
@@ -118,6 +135,14 @@ def init_db():
         cursor.execute("ALTER TABLE bills ADD COLUMN payment_method TEXT DEFAULT 'ACH / Checking'")
     if "payment_detail" not in bill_cols:
         cursor.execute("ALTER TABLE bills ADD COLUMN payment_detail TEXT DEFAULT ''")
+
+    # Migration check for bank_account links on savings_buckets
+    cursor.execute("PRAGMA table_info(savings_buckets)")
+    bucket_cols = [c[1] for c in cursor.fetchall()]
+    if "bank_account_name" not in bucket_cols:
+        cursor.execute("ALTER TABLE savings_buckets ADD COLUMN bank_account_name TEXT DEFAULT ''")
+    if "bank_account_id" not in bucket_cols:
+        cursor.execute("ALTER TABLE savings_buckets ADD COLUMN bank_account_id INTEGER DEFAULT NULL")
 
     conn.commit()
 
@@ -178,14 +203,24 @@ def seed_household_data(cursor):
         ("Partner Salary", 2800.00, "Semi-Monthly", date.today().isoformat(), "Partner"),
     ])
 
-    # Sample Savings Buckets
+    # Sample Bank Accounts
     cursor.executemany("""
-    INSERT INTO savings_buckets (name, target_amount, current_balance, category, icon, owner)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO bank_accounts (name, bank_name, account_type, account_number, routing_number, current_balance, owner)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     """, [
-        ("Emergency Reserve", 10000.00, 4500.00, "Emergency", ":material/shield:", "Shared / Household"),
-        ("Vacation Fund", 3000.00, 1200.00, "Travel", ":material/flight_takeoff:", "Shared / Household"),
-        ("Car Repair / Maintenance", 2000.00, 850.00, "Auto", ":material/build:", "Peter"),
+        ("Primary Checking", "Chase Bank", "Checking", "...4012", "021000021", 5200.00, "Shared / Household"),
+        ("High-Yield Savings", "Capital One", "Savings", "...8821", "031100649", 12500.00, "Shared / Household"),
+        ("Personal Checking", "Ally Bank", "Checking", "...1934", "071000013", 1850.00, "Peter"),
+    ])
+
+    # Sample Savings Buckets (Parent-Child linked to Bank Accounts)
+    cursor.executemany("""
+    INSERT INTO savings_buckets (name, target_amount, current_balance, category, icon, owner, bank_account_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, [
+        ("Emergency Reserve", 10000.00, 4500.00, "Emergency", ":material/shield:", "Shared / Household", "High-Yield Savings"),
+        ("Vacation Fund", 3000.00, 1200.00, "Travel", ":material/flight_takeoff:", "Shared / Household", "High-Yield Savings"),
+        ("Car Repair / Maintenance", 2000.00, 850.00, "Auto", ":material/build:", "Peter", "Personal Checking"),
     ])
 
     # Sample Transactions
@@ -303,23 +338,43 @@ def update_income(income_id, source, amount, frequency, next_paydate, owner="Sha
     conn.commit()
     conn.close()
 
-def add_savings_bucket(name, target_amount, current_balance, category, owner="Shared / Household", icon=":material/savings:"):
+def add_bank_account(name, bank_name, account_type, account_number, routing_number, current_balance, owner="Shared / Household", notes=""):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-    INSERT INTO savings_buckets (name, target_amount, current_balance, category, owner, icon)
-    VALUES (?, ?, ?, ?, ?, ?)
-    """, (name, target_amount, current_balance, category, owner, icon))
+    INSERT INTO bank_accounts (name, bank_name, account_type, account_number, routing_number, current_balance, owner, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (name, bank_name, account_type, account_number, routing_number, current_balance, owner, notes))
     conn.commit()
     conn.close()
 
-def update_savings_bucket(bucket_id, name, target_amount, current_balance, category, owner="Shared / Household", icon=":material/savings:"):
+def update_bank_account(account_id, name, bank_name, account_type, account_number, routing_number, current_balance, owner="Shared / Household", notes=""):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-    UPDATE savings_buckets SET name=?, target_amount=?, current_balance=?, category=?, owner=?, icon=?
+    UPDATE bank_accounts SET name=?, bank_name=?, account_type=?, account_number=?, routing_number=?, current_balance=?, owner=?, notes=?
     WHERE id=?
-    """, (name, target_amount, current_balance, category, owner, icon, bucket_id))
+    """, (name, bank_name, account_type, account_number, routing_number, current_balance, owner, notes, account_id))
+    conn.commit()
+    conn.close()
+
+def add_savings_bucket(name, target_amount, current_balance, category, owner="Shared / Household", icon=":material/savings:", bank_account_name=""):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    INSERT INTO savings_buckets (name, target_amount, current_balance, category, owner, icon, bank_account_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (name, target_amount, current_balance, category, owner, icon, bank_account_name))
+    conn.commit()
+    conn.close()
+
+def update_savings_bucket(bucket_id, name, target_amount, current_balance, category, owner="Shared / Household", icon=":material/savings:", bank_account_name=""):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+    UPDATE savings_buckets SET name=?, target_amount=?, current_balance=?, category=?, owner=?, icon=?, bank_account_name=?
+    WHERE id=?
+    """, (name, target_amount, current_balance, category, owner, icon, bank_account_name, bucket_id))
     conn.commit()
     conn.close()
 

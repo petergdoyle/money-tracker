@@ -70,12 +70,14 @@ def filter_by_owner(items, owner_key="owner"):
     return [item for item in items if item.get(owner_key) == active_person]
 
 # --- Fetch Data & Apply Filter ---
+raw_accounts = db.fetch_all("bank_accounts")
 raw_cards = db.fetch_all("cards")
 raw_bills = db.fetch_all("bills")
 raw_income = db.fetch_all("income")
 raw_buckets = db.fetch_all("savings_buckets")
 raw_transactions = db.fetch_all("transactions")
 
+bank_accounts = filter_by_owner(raw_accounts)
 cards = filter_by_owner(raw_cards)
 bills = filter_by_owner(raw_bills)
 income_sources = filter_by_owner(raw_income)
@@ -87,13 +89,14 @@ savings_categories = db.fetch_categories("savings")
 
 # --- Title Header ---
 st.title("💰 Money Tracker")
-st.caption(f"Perspective: **{selected_perspective}** | Multi-Person Household Cashflow, Bills & Savings")
+st.caption(f"Perspective: **{selected_perspective}** | Multi-Person Household Cashflow, Bank Accounts & Savings")
 
 # --- Top Navigation Tabs ---
-tab_overview, tab_bills, tab_cards, tab_savings, tab_history = st.tabs([
+tab_overview, tab_accounts, tab_cards, tab_bills, tab_savings, tab_history = st.tabs([
     "📊 Overview & Projections",
-    "📄 Bills & Income",
+    "🏛️ Bank Accounts",
     "💳 Credit Cards",
+    "📄 Bills & Income",
     "🎯 Savings Buckets",
     "🧾 Transaction History"
 ])
@@ -102,7 +105,7 @@ tab_overview, tab_bills, tab_cards, tab_savings, tab_history = st.tabs([
 # TAB 1: OVERVIEW & CASHFLOW PROJECTIONS
 # ==============================================================================
 with tab_overview:
-    # Key Summary Metrics
+    total_bank_cash = sum(ba["current_balance"] for ba in bank_accounts)
     total_card_balance = sum(c["balance"] for c in cards)
     total_credit_limit = sum(c["limit_amount"] for c in cards)
     utilization_pct = (total_card_balance / total_credit_limit * 100) if total_credit_limit > 0 else 0.0
@@ -111,10 +114,10 @@ with tab_overview:
     total_savings = sum(s["current_balance"] for s in savings_buckets)
 
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Credit Card Debt", f"${total_card_balance:,.2f}", delta=f"{utilization_pct:.1f}% Utilization", delta_color="inverse")
-    m2.metric("Monthly Obligations", f"${total_monthly_bills:,.2f}", help="Total active recurring monthly obligations in this view")
-    m3.metric("Savings Buckets", f"${total_savings:,.2f}", help="Sum of funds in targeted savings buckets in this view")
-    m4.metric("Active Cards", f"{len(cards)} Cards", help=f"Total Credit Limit: ${total_credit_limit:,.2f}")
+    m1.metric("Total Liquid Bank Cash", f"${total_bank_cash:,.2f}", help="Sum of checking & savings account balances")
+    m2.metric("Credit Card Debt", f"${total_card_balance:,.2f}", delta=f"{utilization_pct:.1f}% Utilization", delta_color="inverse")
+    m3.metric("Monthly Bills", f"${total_monthly_bills:,.2f}", help="Total active recurring monthly obligations")
+    m4.metric("Savings Buckets", f"${total_savings:,.2f}", help="Sum of allocated funds in savings target buckets")
 
     st.markdown("---")
 
@@ -124,9 +127,9 @@ with tab_overview:
     col_ctrl1, col_ctrl2 = st.columns([1, 2])
     with col_ctrl1:
         starting_cash = st.number_input(
-            "Current checking/liquid cash balance ($)",
+            "Starting Cash Balance for Forecast ($)",
             min_value=0.0,
-            value=3500.0,
+            value=float(total_bank_cash) if total_bank_cash > 0 else 2500.0,
             step=100.0,
             format="%.2f",
             key="proj_starting_cash"
@@ -146,7 +149,6 @@ with tab_overview:
     # Plotly Forecast Chart
     fig = go.Figure()
     
-    # Balance Line
     fig.add_trace(go.Scatter(
         x=df_proj["date"],
         y=df_proj["projected_balance"],
@@ -156,7 +158,6 @@ with tab_overview:
         hovertemplate="<b>Date:</b> %{x|%b %d, %Y}<br><b>Projected Cash:</b> $%{y:,.2f}<extra></extra>"
     ))
 
-    # Zero Line Baseline
     fig.add_hline(y=0, line_dash="dash", line_color="#EF4444", annotation_text="Zero Liquidity Threshold")
 
     fig.update_layout(
@@ -193,7 +194,148 @@ with tab_overview:
 
 
 # ==============================================================================
-# TAB 2: BILLS & INCOME MANAGER
+# TAB 2: BANK ACCOUNTS (PARENT ENTITY)
+# ==============================================================================
+with tab_accounts:
+    st.subheader("Bank Accounts & Liquidity")
+
+    with st.container(border=True):
+        with st.expander("➕ Add New Bank Account", expanded=False):
+            with st.form("add_account_form", clear_on_submit=True):
+                ba_name = st.text_input("Account Label", placeholder="e.g. Primary Checking or High-Yield Savings")
+                ba_bank = st.text_input("Bank Name", placeholder="e.g. Chase Bank, Capital One, Ally")
+                ba_type = st.selectbox("Account Type", ["Checking", "Savings", "Money Market"])
+                ba_acct_num = st.text_input("Account # / Last 4", placeholder="e.g. ...4012")
+                ba_routing = st.text_input("Routing Number", placeholder="e.g. 021000021")
+                ba_balance = st.number_input("Current Balance ($)", min_value=0.0, step=50.0, value=1000.0)
+                ba_owner = st.selectbox("Account Owner", people_list)
+                ba_notes = st.text_area("Notes", placeholder="Optional details or branch info")
+
+                ba_submitted = st.form_submit_button("Save Bank Account", icon=":material/add:")
+
+                if ba_submitted and ba_name and ba_bank:
+                    db.add_bank_account(ba_name, ba_bank, ba_type, ba_acct_num, ba_routing, ba_balance, owner=ba_owner, notes=ba_notes)
+                    st.success(f"Added Bank Account '{ba_name}'!")
+                    st.rerun()
+
+    if bank_accounts:
+        ba_cols = st.columns(len(bank_accounts) if len(bank_accounts) <= 3 else 3)
+        for idx, ba in enumerate(bank_accounts):
+            col_target = ba_cols[idx % len(ba_cols)]
+            with col_target:
+                with st.container(border=True):
+                    # Fetch child buckets linked to this bank account
+                    child_buckets = [b for b in raw_buckets if b.get("bank_account_name") == ba["name"]]
+                    allocated_cash = sum(b["current_balance"] for b in child_buckets)
+                    unallocated_cash = ba["current_balance"] - allocated_cash
+
+                    icon_type = "🏦" if ba["account_type"] == "Checking" else "💰"
+                    st.markdown(f"### {icon_type} {ba['name']}")
+                    st.caption(f"Bank: **{ba['bank_name']}** | Type: `{ba['account_type']}` | Owner: 👤 `{ba.get('owner', 'Shared / Household')}`")
+                    
+                    if ba.get("account_number") or ba.get("routing_number"):
+                        st.caption(f"Acct #: `{ba.get('account_number', 'N/A')}` | Routing: `{ba.get('routing_number', 'N/A')}`")
+
+                    b1, b2 = st.columns(2)
+                    b1.metric("Total Balance", f"${ba['current_balance']:,.2f}")
+                    b2.metric("Unallocated", f"${unallocated_cash:,.2f}", help="Total Balance minus funds allocated to child savings buckets")
+
+                    # Parent-Child View: Display Child Savings Buckets
+                    with st.expander(f"🎯 Linked Savings Buckets ({len(child_buckets)})", expanded=True if child_buckets else False):
+                        if child_buckets:
+                            for cb in child_buckets:
+                                cb_prog = (cb['current_balance'] / cb['target_amount'] * 100) if cb['target_amount'] > 0 else 0
+                                st.markdown(f"**{cb.get('icon', '🎯')} {cb['name']}** - `${cb['current_balance']:,.2f}` / `${cb['target_amount']:,.2f}` (`{cb_prog:.0f}%`)")
+                                st.progress(min(cb_prog / 100.0, 1.0))
+                        else:
+                            st.caption("No savings buckets currently assigned to this bank account.")
+
+                    # Edit & Delete Popovers
+                    with st.popover("Edit Account Details", icon=":material/edit:"):
+                        e_name = st.text_input("Name", value=ba['name'], key=f"eba_n_{ba['id']}")
+                        e_bank = st.text_input("Bank", value=ba['bank_name'], key=f"eba_b_{ba['id']}")
+                        
+                        type_opts = ["Checking", "Savings", "Money Market"]
+                        e_type = st.selectbox("Type", type_opts, index=type_opts.index(ba.get('account_type', 'Checking')) if ba.get('account_type') in type_opts else 0, key=f"eba_t_{ba['id']}")
+                        
+                        e_acct = st.text_input("Account #", value=ba.get('account_number', ''), key=f"eba_a_{ba['id']}")
+                        e_rout = st.text_input("Routing #", value=ba.get('routing_number', ''), key=f"eba_r_{ba['id']}")
+                        e_bal = st.number_input("Current Balance ($)", value=float(ba['current_balance']), min_value=0.0, step=50.0, key=f"eba_bal_{ba['id']}")
+                        e_owner = st.selectbox("Owner", people_list, index=people_list.index(ba.get('owner', 'Shared / Household')) if ba.get('owner') in people_list else 0, key=f"eba_o_{ba['id']}")
+
+                        if st.button("Save Account Changes", key=f"save_ba_{ba['id']}"):
+                            db.update_bank_account(ba['id'], e_name, e_bank, e_type, e_acct, e_rout, e_bal, owner=e_owner)
+                            db.log_transaction("Account Update", e_bal, f"Updated balance for {e_name}", e_name, owner=e_owner)
+                            st.rerun()
+
+                    if st.button("Delete Account", key=f"del_ba_{ba['id']}", icon=":material/delete:"):
+                        db.delete_record("bank_accounts", ba['id'])
+                        st.rerun()
+    else:
+        st.info("No bank accounts recorded for this perspective.")
+
+
+# ==============================================================================
+# TAB 3: CREDIT CARDS & UTILIZATION
+# ==============================================================================
+with tab_cards:
+    st.subheader("Credit Card Balances & Utilization")
+
+    with st.container(border=True):
+        with st.expander("➕ Add New Credit Card", expanded=False):
+            with st.form("add_card_form", clear_on_submit=True):
+                card_name = st.text_input("Card Name", placeholder="e.g. Amex Gold")
+                card_balance = st.number_input("Current Balance ($)", min_value=0.0, step=10.0)
+                card_limit = st.number_input("Credit Limit ($)", min_value=1.0, step=100.0, value=5000.0)
+                card_apr = st.number_input("APR (%)", min_value=0.0, step=0.1, value=19.99)
+                card_stmt_day = st.number_input("Statement Day", min_value=1, max_value=31, value=1)
+                card_due_day = st.number_input("Payment Due Day", min_value=1, max_value=31, value=15)
+                card_min_pay = st.number_input("Minimum Payment ($)", min_value=0.0, step=5.0, value=25.0)
+                card_owner = st.selectbox("Card Owner", people_list)
+                
+                card_submitted = st.form_submit_button("Save Credit Card", icon=":material/add:")
+
+                if card_submitted and card_name:
+                    db.add_card(card_name, card_balance, card_limit, card_apr, card_stmt_day, card_due_day, card_min_pay, owner=card_owner)
+                    st.success(f"Added card '{card_name}' for {card_owner}!")
+                    st.rerun()
+
+    if cards:
+        grid_cols = st.columns(len(cards) if len(cards) <= 3 else 3)
+        for i, card in enumerate(cards):
+            col_target = grid_cols[i % len(grid_cols)]
+            with col_target:
+                with st.container(border=True):
+                    util = (card['balance'] / card['limit_amount'] * 100) if card['limit_amount'] > 0 else 0
+                    st.markdown(f"### 💳 {card['name']}")
+                    st.caption(f"Owner: 👤 `{card.get('owner', 'Shared / Household')}`")
+                    st.markdown(f"**Balance:** `${card['balance']:,.2f}` / `${card['limit_amount']:,.2f}`")
+                    st.progress(min(util / 100.0, 1.0), text=f"Utilization: {util:.1f}%")
+
+                    st.caption(f"APR: {card['apr']}% | Due Day: {card['due_day']} | Min Pay: ${card['minimum_payment']:,.2f}")
+
+                    # Balance update popover
+                    with st.popover("Edit Balance / Details", icon=":material/edit:"):
+                        new_bal = st.number_input("Update Balance ($)", value=float(card['balance']), key=f"nb_{card['id']}")
+                        new_limit = st.number_input("Update Limit ($)", value=float(card['limit_amount']), key=f"nl_{card['id']}")
+                        new_card_owner = st.selectbox("Card Owner", people_list, index=people_list.index(card.get('owner', 'Shared / Household')) if card.get('owner') in people_list else 0, key=f"no_{card['id']}")
+                        if st.button("Save Changes", key=f"save_card_{card['id']}"):
+                            db.update_card(
+                                card['id'], card['name'], new_bal, new_limit, 
+                                card['apr'], card['statement_day'], card['due_day'], card['minimum_payment'], owner=new_card_owner
+                            )
+                            db.log_transaction("Card Update", new_bal, f"Updated balance for {card['name']}", card['name'], owner=new_card_owner)
+                            st.rerun()
+
+                    if st.button("Delete Card", key=f"del_card_{card['id']}", icon=":material/delete:"):
+                        db.delete_record("cards", card['id'])
+                        st.rerun()
+    else:
+        st.info("No credit cards recorded for this perspective.")
+
+
+# ==============================================================================
+# TAB 4: BILLS & INCOME MANAGER
 # ==============================================================================
 with tab_bills:
     col_b1, col_b2 = st.columns(2)
@@ -212,11 +354,14 @@ with tab_bills:
                     owner = st.selectbox("Assign to Person / Household", people_list)
                     
                     pay_method = st.selectbox("Payment Method", ["ACH / Checking Account", "Credit Card", "Debit Card", "Manual Check / Cash"])
+                    
+                    bank_names = [ba["name"] for ba in raw_accounts]
                     card_names = [c["name"] for c in raw_cards]
-                    if pay_method == "Credit Card" and card_names:
+                    
+                    if pay_method == "ACH / Checking Account" and bank_names:
+                        pay_detail = st.selectbox("Linked Bank Account", bank_names)
+                    elif pay_method == "Credit Card" and card_names:
                         pay_detail = st.selectbox("Linked Credit Card", card_names)
-                    elif pay_method == "ACH / Checking Account":
-                        pay_detail = st.text_input("Account Detail", value="Primary Checking Account", placeholder="e.g. Primary Checking (...4012)")
                     else:
                         pay_detail = st.text_input("Payment Details", placeholder="e.g. Card name, bank, or reference")
 
@@ -338,66 +483,7 @@ with tab_bills:
 
 
 # ==============================================================================
-# TAB 3: CREDIT CARDS & UTILIZATION
-# ==============================================================================
-with tab_cards:
-    st.subheader("Credit Card Balances & Utilization")
-
-    with st.container(border=True):
-        with st.expander("➕ Add New Credit Card", expanded=False):
-            with st.form("add_card_form", clear_on_submit=True):
-                card_name = st.text_input("Card Name", placeholder="e.g. Amex Gold")
-                card_balance = st.number_input("Current Balance ($)", min_value=0.0, step=10.0)
-                card_limit = st.number_input("Credit Limit ($)", min_value=1.0, step=100.0, value=5000.0)
-                card_apr = st.number_input("APR (%)", min_value=0.0, step=0.1, value=19.99)
-                card_stmt_day = st.number_input("Statement Day", min_value=1, max_value=31, value=1)
-                card_due_day = st.number_input("Payment Due Day", min_value=1, max_value=31, value=15)
-                card_min_pay = st.number_input("Minimum Payment ($)", min_value=0.0, step=5.0, value=25.0)
-                card_owner = st.selectbox("Card Owner", people_list)
-                
-                card_submitted = st.form_submit_button("Save Credit Card", icon=":material/add:")
-
-                if card_submitted and card_name:
-                    db.add_card(card_name, card_balance, card_limit, card_apr, card_stmt_day, card_due_day, card_min_pay, owner=card_owner)
-                    st.success(f"Added card '{card_name}' for {card_owner}!")
-                    st.rerun()
-
-    if cards:
-        grid_cols = st.columns(len(cards) if len(cards) <= 3 else 3)
-        for i, card in enumerate(cards):
-            col_target = grid_cols[i % len(grid_cols)]
-            with col_target:
-                with st.container(border=True):
-                    util = (card['balance'] / card['limit_amount'] * 100) if card['limit_amount'] > 0 else 0
-                    st.markdown(f"### 💳 {card['name']}")
-                    st.caption(f"Owner: 👤 `{card.get('owner', 'Shared / Household')}`")
-                    st.markdown(f"**Balance:** `${card['balance']:,.2f}` / `${card['limit_amount']:,.2f}`")
-                    st.progress(min(util / 100.0, 1.0), text=f"Utilization: {util:.1f}%")
-
-                    st.caption(f"APR: {card['apr']}% | Due Day: {card['due_day']} | Min Pay: ${card['minimum_payment']:,.2f}")
-
-                    # Balance update popover
-                    with st.popover("Edit Balance / Details", icon=":material/edit:"):
-                        new_bal = st.number_input("Update Balance ($)", value=float(card['balance']), key=f"nb_{card['id']}")
-                        new_limit = st.number_input("Update Limit ($)", value=float(card['limit_amount']), key=f"nl_{card['id']}")
-                        new_card_owner = st.selectbox("Card Owner", people_list, index=people_list.index(card.get('owner', 'Shared / Household')) if card.get('owner') in people_list else 0, key=f"no_{card['id']}")
-                        if st.button("Save Changes", key=f"save_card_{card['id']}"):
-                            db.update_card(
-                                card['id'], card['name'], new_bal, new_limit, 
-                                card['apr'], card['statement_day'], card['due_day'], card['minimum_payment'], owner=new_card_owner
-                            )
-                            db.log_transaction("Card Update", new_bal, f"Updated balance for {card['name']}", card['name'], owner=new_card_owner)
-                            st.rerun()
-
-                    if st.button("Delete Card", key=f"del_card_{card['id']}", icon=":material/delete:"):
-                        db.delete_record("cards", card['id'])
-                        st.rerun()
-    else:
-        st.info("No credit cards recorded for this perspective.")
-
-
-# ==============================================================================
-# TAB 4: SAVINGS BUCKETS (SINKING FUNDS)
+# TAB 5: SAVINGS BUCKETS (SINKING FUNDS - CHILD OF BANK ACCOUNT)
 # ==============================================================================
 with tab_savings:
     st.subheader("Target Savings Buckets")
@@ -410,12 +496,16 @@ with tab_savings:
                 bucket_curr = st.number_input("Current Balance ($)", min_value=0.0, step=50.0, value=0.0)
                 bucket_cat = st.selectbox("Category", savings_categories)
                 bucket_owner = st.selectbox("Assign Owner", people_list)
+                
+                bank_opts = ["None / Unlinked"] + [ba["name"] for ba in raw_accounts]
+                bucket_bank = st.selectbox("Parent Bank Account", bank_opts)
                 bucket_icon = st.selectbox("Icon", [":material/shield:", ":material/flight_takeoff:", ":material/build:", ":material/home:", ":material/savings:", ":material/trending_up:"])
 
                 bucket_submitted = st.form_submit_button("Save Savings Bucket", icon=":material/add:")
 
                 if bucket_submitted and bucket_name:
-                    db.add_savings_bucket(bucket_name, bucket_target, bucket_curr, bucket_cat, owner=bucket_owner, icon=bucket_icon)
+                    parent_ba = "" if bucket_bank == "None / Unlinked" else bucket_bank
+                    db.add_savings_bucket(bucket_name, bucket_target, bucket_curr, bucket_cat, owner=bucket_owner, icon=bucket_icon, bank_account_name=parent_ba)
                     st.success(f"Created bucket '{bucket_name}'!")
                     st.rerun()
 
@@ -427,9 +517,32 @@ with tab_savings:
                 with st.container(border=True):
                     prog = (bucket['current_balance'] / bucket['target_amount'] * 100) if bucket['target_amount'] > 0 else 0
                     st.markdown(f"### {bucket.get('icon', ':material/savings:')} {bucket['name']}")
-                    st.caption(f"Owner: 👤 `{bucket.get('owner', 'Shared / Household')}` | Category: `{bucket['category']}`")
+                    
+                    parent_tag = f" | 🏛️ `{bucket.get('bank_account_name')}`" if bucket.get('bank_account_name') else ""
+                    st.caption(f"Owner: 👤 `{bucket.get('owner', 'Shared / Household')}` | Category: `{bucket['category']}`{parent_tag}")
                     st.markdown(f"**Saved:** `${bucket['current_balance']:,.2f}` of `${bucket['target_amount']:,.2f}`")
                     st.progress(min(prog / 100.0, 1.0), text=f"Progress: {prog:.1f}%")
+
+                    # Edit Bucket Popover
+                    with st.popover("Edit Bucket Details", icon=":material/edit:"):
+                        eb_name = st.text_input("Name", value=bucket['name'], key=f"ebk_n_{bucket['id']}")
+                        eb_target = st.number_input("Target ($)", value=float(bucket['target_amount']), min_value=1.0, step=100.0, key=f"ebk_t_{bucket['id']}")
+                        eb_curr = st.number_input("Current Balance ($)", value=float(bucket['current_balance']), min_value=0.0, step=50.0, key=f"ebk_c_{bucket['id']}")
+                        eb_cat = st.selectbox("Category", savings_categories, index=savings_categories.index(bucket.get('category', 'General')) if bucket.get('category') in savings_categories else 0, key=f"ebk_cat_{bucket['id']}")
+                        eb_own = st.selectbox("Owner", people_list, index=people_list.index(bucket.get('owner', 'Shared / Household')) if bucket.get('owner') in people_list else 0, key=f"ebk_o_{bucket['id']}")
+                        
+                        b_opts = ["None / Unlinked"] + [ba["name"] for ba in raw_accounts]
+                        curr_ba = bucket.get("bank_account_name", "None / Unlinked")
+                        eb_ba = st.selectbox("Parent Bank Account", b_opts, index=b_opts.index(curr_ba) if curr_ba in b_opts else 0, key=f"ebk_ba_{bucket['id']}")
+                        
+                        icon_list = [":material/shield:", ":material/flight_takeoff:", ":material/build:", ":material/home:", ":material/savings:", ":material/trending_up:"]
+                        eb_icon = st.selectbox("Icon", icon_list, index=icon_list.index(bucket.get('icon', ':material/savings:')) if bucket.get('icon') in icon_list else 4, key=f"ebk_ic_{bucket['id']}")
+
+                        if st.button("Save Bucket Changes", key=f"save_bk_{bucket['id']}"):
+                            parent_ba = "" if eb_ba == "None / Unlinked" else eb_ba
+                            db.update_savings_bucket(bucket['id'], eb_name, eb_target, eb_curr, eb_cat, owner=eb_own, icon=eb_icon, bank_account_name=parent_ba)
+                            st.success("Savings bucket updated!")
+                            st.rerun()
 
                     # Deposit / Withdraw Controls
                     d_col, w_col = st.columns(2)
@@ -457,7 +570,7 @@ with tab_savings:
 
 
 # ==============================================================================
-# TAB 5: TRANSACTION HISTORY
+# TAB 6: TRANSACTION HISTORY
 # ==============================================================================
 with tab_history:
     st.subheader("Transaction & Activity Log")
