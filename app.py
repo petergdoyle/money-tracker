@@ -970,36 +970,35 @@ with tab_bills:
         
         with st.container(border=True):
             with st.expander("➕ Add New Bill", expanded=False):
-                with st.form("add_bill_form", clear_on_submit=True):
-                    name = st.text_input("Bill Name", placeholder="e.g. Electric Utility")
-                    amount = st.number_input("Amount ($)", min_value=0.0, step=5.0)
-                    due_day = st.number_input("Due Day of Month (1-31)", min_value=1, max_value=31, value=1)
-                    frequency = st.selectbox("Frequency", ["Monthly", "Bi-Weekly", "Annual"])
-                    category = st.selectbox("Category", bill_categories)
-                    owner = st.selectbox("Assign to Person / Household", people_list)
-                    
-                    pay_method = st.selectbox("Payment Method", ["ACH / Checking Account", "Credit Card", "Debit Card", "Manual Check / Cash"])
-                    
-                    bank_names = [ba["name"] for ba in raw_accounts]
-                    card_names = [c["name"] for c in raw_cards]
-                    
-                    if pay_method in ["ACH / Checking Account", "Debit Card"] and bank_names:
-                        pay_detail = st.selectbox("Linked Bank Account", bank_names)
-                    elif pay_method == "Credit Card" and card_names:
-                        pay_detail = st.selectbox("Linked Credit Card", card_names)
-                    else:
-                        pay_detail = st.text_input("Payment Details / Account Reference", placeholder="e.g. Bank name or Card name")
+                name = st.text_input("Bill Name", placeholder="e.g. Electric Utility", key="add_bill_name")
+                amount = st.number_input("Amount ($)", min_value=0.0, step=5.0, key="add_bill_amount")
+                due_day = st.number_input("Due Day of Month (1-31)", min_value=1, max_value=31, value=1, key="add_bill_due_day")
+                frequency = st.selectbox("Frequency", ["Monthly", "Bi-Weekly", "Annual"], key="add_bill_frequency")
+                category = st.selectbox("Category", bill_categories, key="add_bill_category")
+                owner = st.selectbox("Assign to Person / Household", people_list, key="add_bill_owner")
+                
+                pay_method = st.selectbox("Payment Method", ["ACH / Checking Account", "Credit Card", "Debit Card", "Manual Check / Cash"], key="add_bill_pm")
+                
+                bank_names = [ba["name"] for ba in raw_accounts]
+                card_names = [c["name"] for c in raw_cards]
+                
+                if pay_method in ["ACH / Checking Account", "Debit Card"] and bank_names:
+                    pay_detail = st.selectbox("Linked Bank Account", bank_names, key="add_bill_pd_bank")
+                elif pay_method == "Credit Card" and card_names:
+                    pay_detail = st.selectbox("Linked Credit Card", card_names, key="add_bill_pd_card")
+                else:
+                    pay_detail = st.text_input("Payment Details / Account Reference", placeholder="e.g. Bank name or Card name", key="add_bill_pd_text")
 
-                    auto_pay = st.checkbox("Auto-Pay Enabled", value=False)
-                    submitted = st.form_submit_button("Save Bill", icon=":material/add:")
+                auto_pay = st.checkbox("Auto-Pay Enabled", value=False, key="add_bill_auto_pay")
+                submitted = st.button("Save Bill", key="btn_save_new_bill", icon=":material/add:")
 
-                    if submitted and name and amount > 0:
-                        db.add_bill(
-                            name, amount, due_day, frequency, category, 1 if auto_pay else 0,
-                            owner=owner, payment_method=pay_method, payment_detail=pay_detail
-                        )
-                        st.success(f"Added bill '{name}' ({pay_method}: {pay_detail}) for {owner}!")
-                        st.rerun()
+                if submitted and name and amount > 0:
+                    db.add_bill(
+                        name, amount, due_day, frequency, category, 1 if auto_pay else 0,
+                        owner=owner, payment_method=pay_method, payment_detail=pay_detail
+                    )
+                    st.success(f"Added bill '{name}' ({pay_method}: {pay_detail}) for {owner}!")
+                    st.rerun()
 
         # Display Existing Bills
         if bills:
@@ -1070,26 +1069,28 @@ with tab_bills:
 
             with col_add_inc:
                 with st.expander("➕ Add Single Income Source", expanded=False):
-                    with st.form("add_income_form", clear_on_submit=True):
-                        source = st.text_input("Income Source", placeholder="e.g. Primary Paycheck")
-                        inc_amount = st.number_input("Amount per Paycheck ($)", min_value=0.0, step=50.0)
-                        
-                        freq_options = ["Bi-Weekly", "Weekly", "Semi-Monthly", "Monthly", "Twice a Month (Custom Days)", "Custom / Flex Schedule"]
-                        inc_freq = st.selectbox("Frequency", freq_options)
-                        inc_custom_days = st.text_input("Custom Pay Days / Schedule", placeholder="e.g. 1, 15 or 15th & 30th", help="Used when frequency is set to Twice a Month or Custom")
-                        
-                        bank_account_names = [ba["name"] for ba in raw_accounts]
-                        inc_bank = st.selectbox("Target Bank Account (Direct Deposit)", ["-- Unlinked / Manual --"] + bank_account_names)
-                        
-                        next_pay = st.date_input("Next Paydate", value=date.today())
-                        inc_owner = st.selectbox("Assign to Person", people_list)
-                        inc_submitted = st.form_submit_button("Save Income Source", icon=":material/add:")
+                    source = st.text_input("Income Source", placeholder="e.g. Primary Paycheck", key="add_inc_source")
+                    inc_amount = st.number_input("Amount per Paycheck ($)", min_value=0.0, step=50.0, key="add_inc_amount")
+                    
+                    freq_options = ["Bi-Weekly", "Weekly", "Semi-Monthly", "Monthly", "Twice a Month (Custom Days)", "Custom / Flex Schedule"]
+                    inc_freq = st.selectbox("Frequency", freq_options, key="add_inc_freq")
+                    
+                    inc_custom_days = ""
+                    if "Twice a Month" in inc_freq or "Custom" in inc_freq:
+                        inc_custom_days = st.text_input("Custom Pay Days / Schedule", placeholder="e.g. 1, 15 or 15th & 30th", help="Specified payday days of the month", key="add_inc_custom_days")
+                    
+                    bank_account_names = [ba["name"] for ba in raw_accounts]
+                    inc_bank = st.selectbox("Target Bank Account (Direct Deposit)", ["-- Unlinked / Manual --"] + bank_account_names, key="add_inc_bank")
+                    
+                    next_pay = st.date_input("Next Paydate", value=date.today(), key="add_inc_next_pay")
+                    inc_owner = st.selectbox("Assign to Person", people_list, key="add_inc_owner")
+                    inc_submitted = st.button("Save Income Source", key="btn_save_new_income", icon=":material/add:")
 
-                        if inc_submitted and source and inc_amount > 0:
-                            target_ba = "" if inc_bank == "-- Unlinked / Manual --" else inc_bank
-                            db.add_income(source, inc_amount, inc_freq, next_pay.isoformat(), owner=inc_owner, bank_account_name=target_ba, custom_days=inc_custom_days)
-                            st.success(f"Added income '{source}' for {inc_owner}!")
-                            st.rerun()
+                    if inc_submitted and source and inc_amount > 0:
+                        target_ba = "" if inc_bank == "-- Unlinked / Manual --" else inc_bank
+                        db.add_income(source, inc_amount, inc_freq, next_pay.isoformat(), owner=inc_owner, bank_account_name=target_ba, custom_days=inc_custom_days)
+                        st.success(f"Added income '{source}' for {inc_owner}!")
+                        st.rerun()
 
             with col_imp_inc:
                 with st.expander("📥 Import Income (CSV / Excel)", expanded=False):
