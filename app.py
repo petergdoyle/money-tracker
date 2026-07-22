@@ -205,6 +205,128 @@ def parse_card_upload(uploaded_file, default_owner="Shared / Household"):
 
     return cards_to_add, None
 
+# --- File Parser for Bank Account Uploads ---
+def parse_bank_account_upload(uploaded_file, default_owner="Shared / Household"):
+    try:
+        filename = uploaded_file.name.lower()
+        if filename.endswith(".csv"):
+            df = pd.read_csv(uploaded_file)
+        elif filename.endswith(".xlsx") or filename.endswith(".xls"):
+            df = pd.read_excel(uploaded_file)
+        else:
+            return None, "Unsupported file format. Please upload a CSV or Excel file (.csv, .xlsx, .xls)."
+    except Exception as e:
+        return None, f"Failed to parse file: {str(e)}"
+
+    if df.empty:
+        return None, "Uploaded file contains no data rows."
+
+    # Standardize column headers
+    df.columns = [str(c).strip().lower().replace("_", " ") for c in df.columns]
+
+    accounts_to_add = []
+    for idx, row in df.iterrows():
+        # Find account name / label column
+        name_val = None
+        for col in ["account label", "account name", "account", "label", "name"]:
+            if col in row and pd.notna(row[col]):
+                name_val = str(row[col]).strip()
+                break
+        
+        if not name_val:
+            continue
+
+        # Bank Name
+        bank_val = "Chase Bank"
+        for col in ["bank name", "bank", "financial institution", "institution"]:
+            if col in row and pd.notna(row[col]):
+                bank_val = str(row[col]).strip()
+                break
+
+        # Account Type
+        type_val = "Checking"
+        for col in ["account type", "type"]:
+            if col in row and pd.notna(row[col]):
+                val = str(row[col]).strip().title()
+                if "Savings" in val:
+                    type_val = "Savings"
+                elif "Money" in val or "Market" in val:
+                    type_val = "Money Market"
+                else:
+                    type_val = "Checking"
+                break
+
+        # Last 4 / Account Number
+        acct_num_val = ""
+        for col in ["last 4", "last4", "account number", "acct #", "account #", "ending in", "trailing digits"]:
+            if col in row and pd.notna(row[col]):
+                try:
+                    cleaned = str(row[col]).replace("...", "").replace("(", "").replace(")", "").strip()
+                    if cleaned.endswith(".0"):
+                        cleaned = str(int(float(cleaned)))
+                    acct_num_val = cleaned
+                except ValueError:
+                    acct_num_val = str(row[col]).strip()
+                break
+
+        # Routing Number
+        routing_val = ""
+        for col in ["routing number", "routing", "routing #", "aba"]:
+            if col in row and pd.notna(row[col]):
+                try:
+                    cleaned_r = str(row[col]).strip()
+                    if cleaned_r.endswith(".0"):
+                        cleaned_r = str(int(float(cleaned_r)))
+                    routing_val = cleaned_r
+                except ValueError:
+                    routing_val = str(row[col]).strip()
+                break
+
+        # Current Balance
+        bal_val = 0.0
+        for col in ["current balance", "balance", "amount", "bal"]:
+            if col in row and pd.notna(row[col]):
+                try:
+                    cleaned_str = str(row[col]).replace("$", "").replace(",", "").strip()
+                    bal_val = float(cleaned_str)
+                except ValueError:
+                    bal_val = 0.0
+                break
+
+        # Owner
+        owner_val = default_owner
+        for col in ["owner", "person", "member", "assigned to"]:
+            if col in row and pd.notna(row[col]):
+                owner_val = str(row[col]).strip()
+                break
+
+        # Notes
+        notes_val = ""
+        for col in ["notes", "description", "memo"]:
+            if col in row and pd.notna(row[col]):
+                notes_val = str(row[col]).strip()
+                break
+
+        # Append last 4 onto name if provided and not already included
+        if acct_num_val and f"(...{acct_num_val})" not in name_val and acct_num_val not in name_val:
+            name_val = f"{name_val} (...{acct_num_val})"
+
+        accounts_to_add.append({
+            "name": name_val,
+            "bank_name": bank_val,
+            "account_type": type_val,
+            "account_number": acct_num_val,
+            "routing_number": routing_val,
+            "current_balance": bal_val,
+            "owner": owner_val,
+            "notes": notes_val
+        })
+
+    if not accounts_to_add:
+        return None, "No valid bank account rows found. Ensure the spreadsheet contains a column header for 'Account Label' or 'Name'."
+
+    return accounts_to_add, None
+
 # --- Fetch Data & Apply Filter ---
 raw_accounts = db.fetch_all("bank_accounts")
 raw_cards = db.fetch_all("cards")
@@ -336,23 +458,69 @@ with tab_accounts:
     st.subheader("Bank Accounts & Liquidity")
 
     with st.container(border=True):
-        with st.expander("➕ Add New Bank Account", expanded=False):
-            with st.form("add_account_form", clear_on_submit=True):
-                ba_name = st.text_input("Account Label", placeholder="e.g. Primary Checking or High-Yield Savings")
-                ba_bank = st.text_input("Bank Name", placeholder="e.g. Chase Bank, Capital One, Ally")
-                ba_type = st.selectbox("Account Type", ["Checking", "Savings", "Money Market"])
-                ba_acct_num = st.text_input("Account # / Last 4", placeholder="e.g. ...4012")
-                ba_routing = st.text_input("Routing Number", placeholder="e.g. 021000021")
-                ba_balance = st.number_input("Current Balance ($)", min_value=0.0, step=50.0, value=1000.0)
-                ba_owner = st.selectbox("Account Owner", people_list)
-                ba_notes = st.text_area("Notes", placeholder="Optional details or branch info")
+        col_add_ba, col_imp_ba = st.columns(2)
 
-                ba_submitted = st.form_submit_button("Save Bank Account", icon=":material/add:")
+        with col_add_ba:
+            with st.expander("➕ Add Single Bank Account", expanded=False):
+                with st.form("add_account_form", clear_on_submit=True):
+                    ba_name = st.text_input("Account Label", placeholder="e.g. Primary Checking or High-Yield Savings")
+                    ba_bank = st.text_input("Bank Name", placeholder="e.g. Chase Bank, Capital One, Ally")
+                    ba_type = st.selectbox("Account Type", ["Checking", "Savings", "Money Market"])
+                    ba_acct_num = st.text_input("Account # / Last 4", placeholder="e.g. ...4012")
+                    ba_routing = st.text_input("Routing Number", placeholder="e.g. 021000021")
+                    ba_balance = st.number_input("Current Balance ($)", min_value=0.0, step=50.0, value=1000.0)
+                    ba_owner = st.selectbox("Account Owner", people_list)
+                    ba_notes = st.text_area("Notes", placeholder="Optional details or branch info")
 
-                if ba_submitted and ba_name and ba_bank:
-                    db.add_bank_account(ba_name, ba_bank, ba_type, ba_acct_num, ba_routing, ba_balance, owner=ba_owner, notes=ba_notes)
-                    st.success(f"Added Bank Account '{ba_name}'!")
-                    st.rerun()
+                    ba_submitted = st.form_submit_button("Save Bank Account", icon=":material/add:")
+
+                    if ba_submitted and ba_name and ba_bank:
+                        db.add_bank_account(ba_name, ba_bank, ba_type, ba_acct_num, ba_routing, ba_balance, owner=ba_owner, notes=ba_notes)
+                        st.success(f"Added Bank Account '{ba_name}'!")
+                        st.rerun()
+
+        with col_imp_ba:
+            with st.expander("📥 Import Bank Accounts (CSV / Excel)", expanded=False):
+                st.markdown("Upload a CSV or Excel spreadsheet to import multiple bank accounts.")
+                
+                # Sample CSV Download
+                sample_ba_csv = "Account Label,Bank Name,Account Type,Last 4,Routing Number,Current Balance,Owner\nPrimary Checking,Chase Bank,Checking,4012,021000021,5200.00,Peter\nHigh-Yield Savings,Capital One,Savings,8821,031100649,12500.00,Aimee\n"
+                st.download_button(
+                    "📥 Download CSV Template",
+                    data=sample_ba_csv,
+                    file_name="bank_accounts_template.csv",
+                    mime="text/csv",
+                    key="btn_dl_ba_template"
+                )
+
+                uploaded_ba_file = st.file_uploader("Upload CSV or Excel File", type=["csv", "xlsx", "xls"], key="ba_file_uploader")
+                
+                if uploaded_ba_file is not None:
+                    def_ba_owner = active_person if active_person != "ALL" else "Shared / Household"
+                    parsed_accounts, parse_ba_error = parse_bank_account_upload(uploaded_ba_file, default_owner=def_ba_owner)
+                    
+                    if parse_ba_error:
+                        st.error(parse_ba_error)
+                    elif parsed_accounts:
+                        st.success(f"Parsed {len(parsed_accounts)} bank account(s)!")
+                        df_ba_preview = pd.DataFrame(parsed_accounts)
+                        st.dataframe(df_ba_preview, use_container_width=True, hide_index=True)
+
+                        if st.button("Import Bank Accounts Now", key="btn_confirm_ba_import", icon=":material/file_upload:"):
+                            count_ba_added = 0
+                            for ba in parsed_accounts:
+                                owner_name = ba.get("owner") or def_ba_owner
+                                # Auto-register new person if not in household table
+                                if owner_name and owner_name not in people_list:
+                                    db.add_person(owner_name)
+                                
+                                db.add_bank_account(
+                                    ba["name"], ba["bank_name"], ba["account_type"], ba["account_number"],
+                                    ba["routing_number"], ba["current_balance"], owner=owner_name, notes=ba.get("notes", "")
+                                )
+                                count_ba_added += 1
+                            st.success(f"Successfully imported {count_ba_added} bank account(s)!")
+                            st.rerun()
 
     if bank_accounts:
         ba_cols = st.columns(len(bank_accounts) if len(bank_accounts) <= 3 else 3)
