@@ -69,6 +69,124 @@ def filter_by_owner(items, owner_key="owner"):
         return [item for item in items if item.get(owner_key) in [active_person, "Shared / Household"]]
     return [item for item in items if item.get(owner_key) == active_person]
 
+# --- File Parser for Credit Card Uploads ---
+def parse_card_upload(uploaded_file, default_owner="Shared / Household"):
+    try:
+        filename = uploaded_file.name.lower()
+        if filename.endswith(".csv"):
+            df = pd.read_csv(uploaded_file)
+        elif filename.endswith(".xlsx") or filename.endswith(".xls"):
+            df = pd.read_excel(uploaded_file)
+        else:
+            return None, "Unsupported file format. Please upload a CSV or Excel file (.csv, .xlsx, .xls)."
+    except Exception as e:
+        return None, f"Failed to parse file: {str(e)}"
+
+    if df.empty:
+        return None, "Uploaded file contains no data rows."
+
+    # Standardize column headers
+    df.columns = [str(c).strip().lower().replace("_", " ") for c in df.columns]
+
+    cards_to_add = []
+    for idx, row in df.iterrows():
+        # Find card name column
+        name_val = None
+        for col in ["card name", "card", "name", "label", "account"]:
+            if col in row and pd.notna(row[col]):
+                name_val = str(row[col]).strip()
+                break
+        
+        if not name_val:
+            continue
+
+        # Balance
+        bal_val = 0.0
+        for col in ["balance", "current balance", "amount", "bal", "owed"]:
+            if col in row and pd.notna(row[col]):
+                try:
+                    cleaned_str = str(row[col]).replace("$", "").replace(",", "").strip()
+                    bal_val = float(cleaned_str)
+                except ValueError:
+                    bal_val = 0.0
+                break
+
+        # Limit
+        limit_val = 5000.0
+        for col in ["limit", "credit limit", "limit amount", "max"]:
+            if col in row and pd.notna(row[col]):
+                try:
+                    cleaned_str = str(row[col]).replace("$", "").replace(",", "").strip()
+                    limit_val = float(cleaned_str)
+                except ValueError:
+                    limit_val = 5000.0
+                break
+
+        # APR
+        apr_val = 19.99
+        for col in ["apr", "interest", "rate", "apr (%)"]:
+            if col in row and pd.notna(row[col]):
+                try:
+                    cleaned_str = str(row[col]).replace("%", "").strip()
+                    apr_val = float(cleaned_str)
+                except ValueError:
+                    apr_val = 19.99
+                break
+
+        # Statement Day
+        stmt_val = 1
+        for col in ["statement day", "statement", "cycle day"]:
+            if col in row and pd.notna(row[col]):
+                try:
+                    stmt_val = int(float(row[col]))
+                except ValueError:
+                    stmt_val = 1
+                break
+
+        # Due Day
+        due_val = 15
+        for col in ["due day", "payment due day", "due"]:
+            if col in row and pd.notna(row[col]):
+                try:
+                    due_val = int(float(row[col]))
+                except ValueError:
+                    due_val = 15
+                break
+
+        # Min Payment
+        min_val = 25.0
+        for col in ["minimum payment", "min payment", "min pay", "min"]:
+            if col in row and pd.notna(row[col]):
+                try:
+                    cleaned_str = str(row[col]).replace("$", "").replace(",", "").strip()
+                    min_val = float(cleaned_str)
+                except ValueError:
+                    min_val = 25.0
+                break
+
+        # Owner
+        owner_val = default_owner
+        for col in ["owner", "person", "member", "assigned to"]:
+            if col in row and pd.notna(row[col]):
+                owner_val = str(row[col]).strip()
+                break
+
+        cards_to_add.append({
+            "name": name_val,
+            "balance": bal_val,
+            "limit_amount": limit_val,
+            "apr": apr_val,
+            "statement_day": max(1, min(31, stmt_val)),
+            "due_day": max(1, min(31, due_val)),
+            "minimum_payment": min_val,
+            "owner": owner_val
+        })
+
+    if not cards_to_add:
+        return None, "No valid card rows found. Ensure the spreadsheet contains a column header for 'Card Name' or 'Name'."
+
+    return cards_to_add, None
+
 # --- Fetch Data & Apply Filter ---
 raw_accounts = db.fetch_all("bank_accounts")
 raw_cards = db.fetch_all("cards")
@@ -331,23 +449,69 @@ with tab_cards:
     st.subheader("Credit Card Balances & Utilization")
 
     with st.container(border=True):
-        with st.expander("➕ Add New Credit Card", expanded=False):
-            with st.form("add_card_form", clear_on_submit=True):
-                card_name = st.text_input("Card Name", placeholder="e.g. Amex Gold")
-                card_balance = st.number_input("Current Balance ($)", min_value=0.0, step=10.0)
-                card_limit = st.number_input("Credit Limit ($)", min_value=1.0, step=100.0, value=5000.0)
-                card_apr = st.number_input("APR (%)", min_value=0.0, step=0.1, value=19.99)
-                card_stmt_day = st.number_input("Statement Day", min_value=1, max_value=31, value=1)
-                card_due_day = st.number_input("Payment Due Day", min_value=1, max_value=31, value=15)
-                card_min_pay = st.number_input("Minimum Payment ($)", min_value=0.0, step=5.0, value=25.0)
-                card_owner = st.selectbox("Card Owner", people_list)
-                
-                card_submitted = st.form_submit_button("Save Credit Card", icon=":material/add:")
+        col_add_c, col_imp_c = st.columns(2)
 
-                if card_submitted and card_name:
-                    db.add_card(card_name, card_balance, card_limit, card_apr, card_stmt_day, card_due_day, card_min_pay, owner=card_owner)
-                    st.success(f"Added card '{card_name}' for {card_owner}!")
-                    st.rerun()
+        with col_add_c:
+            with st.expander("➕ Add Single Credit Card", expanded=False):
+                with st.form("add_card_form", clear_on_submit=True):
+                    card_name = st.text_input("Card Name", placeholder="e.g. Amex Gold")
+                    card_balance = st.number_input("Current Balance ($)", min_value=0.0, step=10.0)
+                    card_limit = st.number_input("Credit Limit ($)", min_value=1.0, step=100.0, value=5000.0)
+                    card_apr = st.number_input("APR (%)", min_value=0.0, step=0.1, value=19.99)
+                    card_stmt_day = st.number_input("Statement Day", min_value=1, max_value=31, value=1)
+                    card_due_day = st.number_input("Payment Due Day", min_value=1, max_value=31, value=15)
+                    card_min_pay = st.number_input("Minimum Payment ($)", min_value=0.0, step=5.0, value=25.0)
+                    card_owner = st.selectbox("Card Owner", people_list)
+                    
+                    card_submitted = st.form_submit_button("Save Credit Card", icon=":material/add:")
+
+                    if card_submitted and card_name:
+                        db.add_card(card_name, card_balance, card_limit, card_apr, card_stmt_day, card_due_day, card_min_pay, owner=card_owner)
+                        st.success(f"Added card '{card_name}' for {card_owner}!")
+                        st.rerun()
+
+        with col_imp_c:
+            with st.expander("📥 Import Credit Cards (CSV / Excel)", expanded=False):
+                st.markdown("Upload a CSV or Excel spreadsheet to import multiple credit cards.")
+                
+                # Sample CSV Download
+                sample_csv = "Card Name,Balance,Limit,APR,Statement Day,Due Day,Min Payment,Owner\nAmex Gold,1250.00,10000.00,24.99,5,25,100.00,Peter\nChase Sapphire,450.00,8000.00,21.49,12,2,35.00,Aimee\n"
+                st.download_button(
+                    "📥 Download CSV Template",
+                    data=sample_csv,
+                    file_name="credit_cards_template.csv",
+                    mime="text/csv",
+                    key="btn_dl_card_template"
+                )
+
+                uploaded_card_file = st.file_uploader("Upload CSV or Excel File", type=["csv", "xlsx", "xls"], key="card_file_uploader")
+                
+                if uploaded_card_file is not None:
+                    def_owner = active_person if active_person != "ALL" else "Shared / Household"
+                    parsed_cards, parse_error = parse_card_upload(uploaded_card_file, default_owner=def_owner)
+                    
+                    if parse_error:
+                        st.error(parse_error)
+                    elif parsed_cards:
+                        st.success(f"Parsed {len(parsed_cards)} card(s)!")
+                        df_preview = pd.DataFrame(parsed_cards)
+                        st.dataframe(df_preview, width="stretch", hide_index=True)
+
+                        if st.button("Import Cards Now", key="btn_confirm_card_import", icon=":material/file_upload:"):
+                            count_added = 0
+                            for c in parsed_cards:
+                                owner_name = c.get("owner") or def_owner
+                                # Auto-register new person if not in household table
+                                if owner_name and owner_name not in people_list:
+                                    db.add_person(owner_name)
+                                
+                                db.add_card(
+                                    c["name"], c["balance"], c["limit_amount"], c["apr"],
+                                    c["statement_day"], c["due_day"], c["minimum_payment"], owner=owner_name
+                                )
+                                count_added += 1
+                            st.success(f"Successfully imported {count_added} credit card(s)!")
+                            st.rerun()
 
     if cards:
         grid_cols = st.columns(len(cards) if len(cards) <= 3 else 3)
