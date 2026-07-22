@@ -187,8 +187,8 @@ def seed_household_data(cursor):
     INSERT INTO bills (name, amount, due_day, frequency, category, auto_pay, is_active, owner, payment_method, payment_detail)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, [
-        ("Rent / Mortgage", 1850.00, 1, "Monthly", "Housing", 1, 1, "Shared / Household", "ACH / Checking", "Primary Checking (...4012)"),
-        ("Electric Utility", 120.00, 15, "Monthly", "Utilities", 1, 1, "Shared / Household", "ACH / Checking", "Primary Checking (...4012)"),
+        ("Rent / Mortgage", 1850.00, 1, "Monthly", "Housing", 1, 1, "Shared / Household", "ACH / Checking Account", "Primary Checking"),
+        ("Electric Utility", 120.00, 15, "Monthly", "Utilities", 1, 1, "Shared / Household", "ACH / Checking Account", "Primary Checking"),
         ("Internet (Fiber)", 80.00, 10, "Monthly", "Utilities", 1, 1, "Peter", "Credit Card", "Amex Gold"),
         ("Car Insurance", 145.00, 20, "Monthly", "Insurance", 1, 1, "Partner", "Credit Card", "Chase Sapphire"),
         ("Cloud Server Hosting", 45.00, 5, "Monthly", "Subscriptions", 1, 1, "Peter", "Credit Card", "Amex Gold"),

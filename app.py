@@ -255,12 +255,46 @@ with tab_accounts:
                             st.caption("No savings buckets currently assigned to this bank account.")
 
                     # Linked ACH Bills
-                    with st.expander(f"📄 Linked ACH Bills ({len(linked_ach_bills)}) - ${ach_monthly:,.2f}/mo", expanded=False):
+                    linked_ach_bills = [
+                        b for b in raw_bills 
+                        if b.get("is_active", 1) and (
+                            b.get("payment_detail") == ba["name"] or
+                            (b.get("payment_detail") and ba["name"].lower() in b.get("payment_detail").lower()) or
+                            (b.get("payment_detail") and b.get("payment_detail").lower() in ba["name"].lower())
+                        )
+                    ]
+                    ach_monthly = sum(b["amount"] for b in linked_ach_bills)
+
+                    with st.expander(f"📄 Linked ACH Bills ({len(linked_ach_bills)}) - ${ach_monthly:,.2f}/mo", expanded=True if linked_ach_bills else False):
                         if linked_ach_bills:
                             for ab in linked_ach_bills:
-                                st.markdown(f"• **{ab['name']}** - `${ab['amount']:,.2f}`/mo (Due Day {ab['due_day']})")
-                        else:
-                            st.caption("No recurring ACH bills currently linked to this bank account.")
+                                l_col1, l_col2 = st.columns([3, 1])
+                                l_col1.markdown(f"• **{ab['name']}** - `${ab['amount']:,.2f}`/mo (Due Day {ab['due_day']})")
+                                if l_col2.button("Unlink", key=f"unlink_ach_{ba['id']}_{ab['id']}", icon=":material/link_off:"):
+                                    db.update_bill(
+                                        ab['id'], ab['name'], ab['amount'], ab['due_day'], ab['frequency'], ab['category'],
+                                        ab['auto_pay'], owner=ab.get('owner', 'Shared / Household'),
+                                        payment_method="Manual Check / Cash", payment_detail="", is_active=ab.get('is_active', 1)
+                                    )
+                                    st.rerun()
+
+                        # Link Unlinked Bill Popover directly from the Bank Account Card!
+                        unlinked_ach_bills = [b for b in raw_bills if b not in linked_ach_bills]
+                        if unlinked_ach_bills:
+                            with st.popover("🔗 Link an ACH Bill to this Account", icon=":material/link:"):
+                                bill_to_link = st.selectbox("Select Bill", [f"{b['name']} (${b['amount']:,.2f}/mo)" for b in unlinked_ach_bills], key=f"sel_link_ach_{ba['id']}")
+                                if st.button("Link Bill to Account", key=f"btn_link_ach_{ba['id']}"):
+                                    selected_name = bill_to_link.split(" ($")[0]
+                                    target_bill = next(b for b in unlinked_ach_bills if b["name"] == selected_name)
+                                    db.update_bill(
+                                        target_bill['id'], target_bill['name'], target_bill['amount'], target_bill['due_day'],
+                                        target_bill['frequency'], target_bill['category'], target_bill['auto_pay'],
+                                        owner=target_bill.get('owner', 'Shared / Household'),
+                                        payment_method="ACH / Checking Account", payment_detail=ba["name"],
+                                        is_active=target_bill.get('is_active', 1)
+                                    )
+                                    st.success(f"Linked '{target_bill['name']}' to {ba['name']}!")
+                                    st.rerun()
 
                     # Edit & Delete Popovers
                     with st.popover("Edit Account Details", icon=":material/edit:"):
@@ -327,14 +361,46 @@ with tab_cards:
                     st.caption(f"APR: {card['apr']}% | Due Day: {card['due_day']} | Min Pay: ${card['minimum_payment']:,.2f}")
 
                     # Linked Auto-Pay Bills
-                    card_linked_bills = [b for b in raw_bills if b.get("payment_detail") == card["name"] and b.get("is_active", 1)]
+                    card_linked_bills = [
+                        b for b in raw_bills 
+                        if b.get("is_active", 1) and (
+                            b.get("payment_detail") == card["name"] or
+                            (b.get("payment_detail") and card["name"].lower() in b.get("payment_detail").lower()) or
+                            (b.get("payment_detail") and b.get("payment_detail").lower() in card["name"].lower())
+                        )
+                    ]
                     card_monthly = sum(b["amount"] for b in card_linked_bills)
-                    with st.expander(f"📄 Linked Auto-Pay Bills ({len(card_linked_bills)}) - ${card_monthly:,.2f}/mo", expanded=False):
+                    
+                    with st.expander(f"📄 Linked Auto-Pay Bills ({len(card_linked_bills)}) - ${card_monthly:,.2f}/mo", expanded=True if card_linked_bills else False):
                         if card_linked_bills:
                             for cb in card_linked_bills:
-                                st.markdown(f"• **{cb['name']}** - `${cb['amount']:,.2f}`/mo (Due Day {cb['due_day']})")
-                        else:
-                            st.caption("No recurring bills currently linked to this credit card.")
+                                c_col1, c_col2 = st.columns([3, 1])
+                                c_col1.markdown(f"• **{cb['name']}** - `${cb['amount']:,.2f}`/mo (Due Day {cb['due_day']})")
+                                if c_col2.button("Unlink", key=f"unlink_card_{card['id']}_{cb['id']}", icon=":material/link_off:"):
+                                    db.update_bill(
+                                        cb['id'], cb['name'], cb['amount'], cb['due_day'], cb['frequency'], cb['category'],
+                                        cb['auto_pay'], owner=cb.get('owner', 'Shared / Household'),
+                                        payment_method="Manual Check / Cash", payment_detail="", is_active=cb.get('is_active', 1)
+                                    )
+                                    st.rerun()
+
+                        # Link Bill to Credit Card Popover
+                        unlinked_card_bills = [b for b in raw_bills if b not in card_linked_bills]
+                        if unlinked_card_bills:
+                            with st.popover("🔗 Link a Bill to this Credit Card", icon=":material/link:"):
+                                card_bill_to_link = st.selectbox("Select Bill", [f"{b['name']} (${b['amount']:,.2f}/mo)" for b in unlinked_card_bills], key=f"sel_link_card_{card['id']}")
+                                if st.button("Link Bill to Card", key=f"btn_link_card_{card['id']}"):
+                                    selected_cb_name = card_bill_to_link.split(" ($")[0]
+                                    target_cb = next(b for b in unlinked_card_bills if b["name"] == selected_cb_name)
+                                    db.update_bill(
+                                        target_cb['id'], target_cb['name'], target_cb['amount'], target_cb['due_day'],
+                                        target_cb['frequency'], target_cb['category'], target_cb['auto_pay'],
+                                        owner=target_cb.get('owner', 'Shared / Household'),
+                                        payment_method="Credit Card", payment_detail=card["name"],
+                                        is_active=target_cb.get('is_active', 1)
+                                    )
+                                    st.success(f"Linked '{target_cb['name']}' to {card['name']}!")
+                                    st.rerun()
 
                     # Balance update popover
                     with st.popover("Edit Balance / Details", icon=":material/edit:"):
