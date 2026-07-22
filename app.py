@@ -256,6 +256,13 @@ def parse_card_upload(uploaded_file, default_owner="Shared / Household"):
                 owner_val = str(row[col]).strip()
                 break
 
+        # Notes / Intended Usage
+        notes_val = ""
+        for col in ["notes", "note", "intended use", "usage", "description", "purpose"]:
+            if col in row and pd.notna(row[col]):
+                notes_val = str(row[col]).strip()
+                break
+
         cards_to_add.append({
             "name": name_val,
             "balance": bal_val,
@@ -264,7 +271,8 @@ def parse_card_upload(uploaded_file, default_owner="Shared / Household"):
             "statement_day": max(1, min(31, stmt_val)),
             "due_day": max(1, min(31, due_val)),
             "minimum_payment": min_val,
-            "owner": owner_val
+            "owner": owner_val,
+            "notes": notes_val
         })
 
     if not cards_to_add:
@@ -839,6 +847,7 @@ with tab_cards:
                     card_due_day = st.number_input("Payment Due Day", min_value=1, max_value=31, value=15)
                     card_min_pay = st.number_input("Minimum Payment ($)", min_value=0.0, step=5.0, value=25.0)
                     card_owner = st.selectbox("Card Owner", people_list)
+                    card_notes = st.text_area("Notes / Intended Usage", placeholder="e.g. Dining, Travel, Groceries, or specific recurring subscriptions")
                     
                     card_submitted = st.form_submit_button("Save Credit Card", icon=":material/add:")
 
@@ -849,7 +858,7 @@ with tab_cards:
                             if f"(...{l4})" not in final_card_name and l4 not in final_card_name:
                                 final_card_name = f"{final_card_name} (...{l4})"
 
-                        db.add_card(final_card_name, card_balance, card_limit, card_apr, card_stmt_day, card_due_day, card_min_pay, owner=card_owner)
+                        db.add_card(final_card_name, card_balance, card_limit, card_apr, card_stmt_day, card_due_day, card_min_pay, owner=card_owner, notes=card_notes)
                         st.success(f"Added card '{final_card_name}' for {card_owner}!")
                         st.rerun()
 
@@ -858,7 +867,7 @@ with tab_cards:
                 st.markdown("Upload a CSV or Excel spreadsheet to import multiple credit cards.")
                 
                 # Sample CSV Download
-                sample_csv = "Card Name,Last 4,Balance,Limit,APR,Statement Day,Due Day,Min Payment,Owner\nAmex Gold,8006,1250.00,10000.00,24.99,5,25,100.00,Peter\nChase Sapphire,1934,450.00,8000.00,21.49,12,2,35.00,Aimee\n"
+                sample_csv = "Card Name,Last 4,Balance,Limit,APR,Statement Day,Due Day,Min Payment,Owner,Notes\nAmex Gold,8006,1250.00,10000.00,24.99,5,25,100.00,Peter,\"Dining & Grocery purchases\"\nChase Sapphire,1934,450.00,8000.00,21.49,12,2,35.00,Aimee,\"Travel & Flights\"\n"
                 st.download_button(
                     "📥 Download CSV Template",
                     data=sample_csv,
@@ -890,7 +899,7 @@ with tab_cards:
                                 
                                 db.add_card(
                                     c["name"], c["balance"], c["limit_amount"], c["apr"],
-                                    c["statement_day"], c["due_day"], c["minimum_payment"], owner=owner_name
+                                    c["statement_day"], c["due_day"], c["minimum_payment"], owner=owner_name, notes=c.get("notes", "")
                                 )
                                 count_added += 1
                             st.success(f"Successfully imported {count_added} credit card(s)!")
@@ -909,6 +918,8 @@ with tab_cards:
                     st.progress(min(util / 100.0, 1.0), text=f"Utilization: {util:.1f}%")
 
                     st.caption(f"APR: {card['apr']}% | Due Day: {card['due_day']} | Min Pay: ${card['minimum_payment']:,.2f}")
+                    if card.get("notes"):
+                        st.caption(f"📝 **Usage / Notes:** {card['notes']}")
 
                     # Linked Auto-Pay Bills
                     card_linked_bills = [
@@ -971,6 +982,7 @@ with tab_cards:
                         edit_due = st.number_input("Payment Due Day", value=int(card['due_day']), min_value=1, max_value=31, key=f"ec_due_{card['id']}")
                         edit_min = st.number_input("Minimum Payment ($)", value=float(card['minimum_payment']), step=5.0, key=f"ec_min_{card['id']}")
                         edit_card_owner = st.selectbox("Card Owner", people_list, index=people_list.index(card.get('owner', 'Shared / Household')) if card.get('owner') in people_list else 0, key=f"no_{card['id']}")
+                        edit_notes = st.text_area("Notes / Intended Usage", value=card.get('notes', ''), key=f"ec_notes_{card['id']}")
 
                         if st.button("Save Changes", key=f"save_card_{card['id']}"):
                             final_edit_name = edit_cname.strip()
@@ -982,7 +994,7 @@ with tab_cards:
                             old_card_name = card['name']
                             db.update_card(
                                 card['id'], final_edit_name, edit_bal, edit_limit, 
-                                edit_apr, edit_stmt, edit_due, edit_min, owner=edit_card_owner
+                                edit_apr, edit_stmt, edit_due, edit_min, owner=edit_card_owner, notes=edit_notes
                             )
 
                             # Cascading update for linked bills if card name changed
