@@ -100,6 +100,24 @@ def parse_card_upload(uploaded_file, default_owner="Shared / Household"):
         if not name_val:
             continue
 
+        # Trailing Last 4 Digits / Account Identifier
+        last4_val = None
+        for col in ["last 4", "last4", "card number", "account number", "ending in", "last four", "trailing digits"]:
+            if col in row and pd.notna(row[col]):
+                try:
+                    cleaned_l4 = str(row[col]).replace("...", "").replace("(", "").replace(")", "").strip()
+                    if cleaned_l4.endswith(".0"):
+                        cleaned_l4 = str(int(float(cleaned_l4)))
+                    if cleaned_l4:
+                        last4_val = cleaned_l4
+                except ValueError:
+                    pass
+                break
+
+        # Format card name with trailing identifier if provided and not already included
+        if last4_val and last4_val not in name_val:
+            name_val = f"{name_val} (...{last4_val})"
+
         # Balance
         bal_val = 0.0
         for col in ["balance", "current balance", "amount", "bal", "owed"]:
@@ -289,7 +307,7 @@ with tab_overview:
         margin=dict(l=20, r=20, t=40, b=20)
     )
 
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
     # Upcoming Bills Table (Next 14 Days)
     st.subheader("Upcoming Bills & Paydays (Next 14 Days)")
@@ -305,7 +323,7 @@ with tab_overview:
                 "projected_balance": st.column_config.NumberColumn("Ending Cash", format="$%.2f"),
             },
             hide_index=True,
-            width="stretch"
+            use_container_width=True
         )
     else:
         st.info("No scheduled bills or paydays due in the next 14 days.")
@@ -475,7 +493,7 @@ with tab_cards:
                 st.markdown("Upload a CSV or Excel spreadsheet to import multiple credit cards.")
                 
                 # Sample CSV Download
-                sample_csv = "Card Name,Balance,Limit,APR,Statement Day,Due Day,Min Payment,Owner\nAmex Gold,1250.00,10000.00,24.99,5,25,100.00,Peter\nChase Sapphire,450.00,8000.00,21.49,12,2,35.00,Aimee\n"
+                sample_csv = "Card Name,Last 4,Balance,Limit,APR,Statement Day,Due Day,Min Payment,Owner\nAmex Gold,8006,1250.00,10000.00,24.99,5,25,100.00,Peter\nChase Sapphire,1934,450.00,8000.00,21.49,12,2,35.00,Aimee\n"
                 st.download_button(
                     "📥 Download CSV Template",
                     data=sample_csv,
@@ -495,7 +513,7 @@ with tab_cards:
                     elif parsed_cards:
                         st.success(f"Parsed {len(parsed_cards)} card(s)!")
                         df_preview = pd.DataFrame(parsed_cards)
-                        st.dataframe(df_preview, width="stretch", hide_index=True)
+                        st.dataframe(df_preview, use_container_width=True, hide_index=True)
 
                         if st.button("Import Cards Now", key="btn_confirm_card_import", icon=":material/file_upload:"):
                             count_added = 0
@@ -853,7 +871,7 @@ with tab_history:
                 "owner": "Owner / Perspective"
             },
             hide_index=True,
-            width="stretch"
+            use_container_width=True
         )
     else:
         st.info("No transactions logged for this perspective.")
