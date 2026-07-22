@@ -265,27 +265,30 @@ with tab_accounts:
                     ]
                     ach_monthly = sum(b["amount"] for b in linked_ach_bills)
 
-                    with st.expander(f"📄 Linked ACH Bills ({len(linked_ach_bills)}) - ${ach_monthly:,.2f}/mo", expanded=True if linked_ach_bills else False):
+                    with st.expander(f"📄 Linked ACH Bills ({len(linked_ach_bills)}) - ${ach_monthly:,.2f}/mo", expanded=True):
                         if linked_ach_bills:
                             for ab in linked_ach_bills:
                                 l_col1, l_col2 = st.columns([3, 1])
-                                l_col1.markdown(f"• **{ab['name']}** - `${ab['amount']:,.2f}`/mo (Due Day {ab['due_day']})")
+                                l_col1.markdown(f"• **{ab['name']}** - `${ab['amount']:,.2f}`/mo (Due Day {ab['due_day']} | 👤 `{ab.get('owner', 'Shared')}`)")
                                 if l_col2.button("Unlink", key=f"unlink_ach_{ba['id']}_{ab['id']}", icon=":material/link_off:"):
                                     db.update_bill(
                                         ab['id'], ab['name'], ab['amount'], ab['due_day'], ab['frequency'], ab['category'],
                                         ab['auto_pay'], owner=ab.get('owner', 'Shared / Household'),
-                                        payment_method="Manual Check / Cash", payment_detail="", is_active=ab.get('is_active', 1)
+                                        payment_method="ACH / Checking Account", payment_detail="", is_active=ab.get('is_active', 1)
                                     )
                                     st.rerun()
+                        else:
+                            st.caption("No recurring ACH bills currently linked to this bank account.")
 
                         # Link Unlinked Bill Popover directly from the Bank Account Card!
-                        unlinked_ach_bills = [b for b in raw_bills if b not in linked_ach_bills]
-                        if unlinked_ach_bills:
+                        candidate_ach_bills = [b for b in raw_bills if b not in linked_ach_bills]
+                        if candidate_ach_bills:
                             with st.popover("🔗 Link an ACH Bill to this Account", icon=":material/link:"):
-                                bill_to_link = st.selectbox("Select Bill", [f"{b['name']} (${b['amount']:,.2f}/mo)" for b in unlinked_ach_bills], key=f"sel_link_ach_{ba['id']}")
+                                bill_map = {f"#{b['id']} - {b['name']} (${b['amount']:,.2f}/mo)": b['id'] for b in candidate_ach_bills}
+                                selected_label = st.selectbox("Select Bill to Link", list(bill_map.keys()), key=f"sel_link_ach_{ba['id']}")
                                 if st.button("Link Bill to Account", key=f"btn_link_ach_{ba['id']}"):
-                                    selected_name = bill_to_link.split(" ($")[0]
-                                    target_bill = next(b for b in unlinked_ach_bills if b["name"] == selected_name)
+                                    target_id = bill_map[selected_label]
+                                    target_bill = next(b for b in raw_bills if b["id"] == target_id)
                                     db.update_bill(
                                         target_bill['id'], target_bill['name'], target_bill['amount'], target_bill['due_day'],
                                         target_bill['frequency'], target_bill['category'], target_bill['auto_pay'],
