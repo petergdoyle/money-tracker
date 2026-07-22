@@ -229,6 +229,10 @@ with tab_accounts:
                     allocated_cash = sum(b["current_balance"] for b in child_buckets)
                     unallocated_cash = ba["current_balance"] - allocated_cash
 
+                    # Fetch linked ACH bills
+                    linked_ach_bills = [b for b in raw_bills if b.get("payment_detail") == ba["name"] and b.get("is_active", 1)]
+                    ach_monthly = sum(b["amount"] for b in linked_ach_bills)
+
                     icon_type = "🏦" if ba["account_type"] == "Checking" else "💰"
                     st.markdown(f"### {icon_type} {ba['name']}")
                     st.caption(f"Bank: **{ba['bank_name']}** | Type: `{ba['account_type']}` | Owner: 👤 `{ba.get('owner', 'Shared / Household')}`")
@@ -249,6 +253,14 @@ with tab_accounts:
                                 st.progress(min(cb_prog / 100.0, 1.0))
                         else:
                             st.caption("No savings buckets currently assigned to this bank account.")
+
+                    # Linked ACH Bills
+                    with st.expander(f"📄 Linked ACH Bills ({len(linked_ach_bills)}) - ${ach_monthly:,.2f}/mo", expanded=False):
+                        if linked_ach_bills:
+                            for ab in linked_ach_bills:
+                                st.markdown(f"• **{ab['name']}** - `${ab['amount']:,.2f}`/mo (Due Day {ab['due_day']})")
+                        else:
+                            st.caption("No recurring ACH bills currently linked to this bank account.")
 
                     # Edit & Delete Popovers
                     with st.popover("Edit Account Details", icon=":material/edit:"):
@@ -314,6 +326,16 @@ with tab_cards:
 
                     st.caption(f"APR: {card['apr']}% | Due Day: {card['due_day']} | Min Pay: ${card['minimum_payment']:,.2f}")
 
+                    # Linked Auto-Pay Bills
+                    card_linked_bills = [b for b in raw_bills if b.get("payment_detail") == card["name"] and b.get("is_active", 1)]
+                    card_monthly = sum(b["amount"] for b in card_linked_bills)
+                    with st.expander(f"📄 Linked Auto-Pay Bills ({len(card_linked_bills)}) - ${card_monthly:,.2f}/mo", expanded=False):
+                        if card_linked_bills:
+                            for cb in card_linked_bills:
+                                st.markdown(f"• **{cb['name']}** - `${cb['amount']:,.2f}`/mo (Due Day {cb['due_day']})")
+                        else:
+                            st.caption("No recurring bills currently linked to this credit card.")
+
                     # Balance update popover
                     with st.popover("Edit Balance / Details", icon=":material/edit:"):
                         new_bal = st.number_input("Update Balance ($)", value=float(card['balance']), key=f"nb_{card['id']}")
@@ -358,12 +380,12 @@ with tab_bills:
                     bank_names = [ba["name"] for ba in raw_accounts]
                     card_names = [c["name"] for c in raw_cards]
                     
-                    if pay_method == "ACH / Checking Account" and bank_names:
+                    if pay_method in ["ACH / Checking Account", "Debit Card"] and bank_names:
                         pay_detail = st.selectbox("Linked Bank Account", bank_names)
                     elif pay_method == "Credit Card" and card_names:
                         pay_detail = st.selectbox("Linked Credit Card", card_names)
                     else:
-                        pay_detail = st.text_input("Payment Details", placeholder="e.g. Card name, bank, or reference")
+                        pay_detail = st.text_input("Payment Details / Account Reference", placeholder="e.g. Bank name or Card name")
 
                     auto_pay = st.checkbox("Auto-Pay Enabled", value=False)
                     submitted = st.form_submit_button("Save Bill", icon=":material/add:")
@@ -373,7 +395,7 @@ with tab_bills:
                             name, amount, due_day, frequency, category, 1 if auto_pay else 0,
                             owner=owner, payment_method=pay_method, payment_detail=pay_detail
                         )
-                        st.success(f"Added bill '{name}' ({pay_method}) for {owner}!")
+                        st.success(f"Added bill '{name}' ({pay_method}: {pay_detail}) for {owner}!")
                         st.rerun()
 
         # Display Existing Bills
@@ -407,7 +429,17 @@ with tab_bills:
                             
                             pm_opts = ["ACH / Checking Account", "Credit Card", "Debit Card", "Manual Check / Cash"]
                             edit_pm = st.selectbox("Payment Method", pm_opts, index=pm_opts.index(b.get('payment_method', 'ACH / Checking Account')) if b.get('payment_method') in pm_opts else 0, key=f"eb_pm_{b['id']}")
-                            edit_pd = st.text_input("Payment Details", value=b.get('payment_detail', ''), key=f"eb_pd_{b['id']}")
+                            
+                            bank_names = [ba["name"] for ba in raw_accounts]
+                            card_names = [c["name"] for c in raw_cards]
+                            curr_pd = b.get('payment_detail', '')
+
+                            if edit_pm in ["ACH / Checking Account", "Debit Card"] and bank_names:
+                                edit_pd = st.selectbox("Linked Bank Account", bank_names, index=bank_names.index(curr_pd) if curr_pd in bank_names else 0, key=f"eb_pd_sel_{b['id']}")
+                            elif edit_pm == "Credit Card" and card_names:
+                                edit_pd = st.selectbox("Linked Credit Card", card_names, index=card_names.index(curr_pd) if curr_pd in card_names else 0, key=f"eb_pd_card_{b['id']}")
+                            else:
+                                edit_pd = st.text_input("Payment Details", value=curr_pd, key=f"eb_pd_txt_{b['id']}")
                             
                             edit_autopay = st.checkbox("Auto-Pay Enabled", value=bool(b.get('auto_pay', 0)), key=f"eb_auto_{b['id']}")
                             edit_active = st.checkbox("Active Bill", value=bool(b.get('is_active', 1)), key=f"eb_act_{b['id']}")
