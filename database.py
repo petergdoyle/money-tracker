@@ -60,6 +60,8 @@ def init_db():
         auto_pay INTEGER DEFAULT 0,
         is_active INTEGER DEFAULT 1,
         owner TEXT DEFAULT 'Shared / Household',
+        payment_method TEXT DEFAULT 'ACH / Checking',
+        payment_detail TEXT DEFAULT '',
         notes TEXT
     )
     """)
@@ -109,6 +111,14 @@ def init_db():
         if "owner" not in cols:
             cursor.execute(f"ALTER TABLE {table} ADD COLUMN owner TEXT DEFAULT 'Shared / Household'")
 
+    # Migration check for payment_method and payment_detail on bills
+    cursor.execute("PRAGMA table_info(bills)")
+    bill_cols = [c[1] for c in cursor.fetchall()]
+    if "payment_method" not in bill_cols:
+        cursor.execute("ALTER TABLE bills ADD COLUMN payment_method TEXT DEFAULT 'ACH / Checking'")
+    if "payment_detail" not in bill_cols:
+        cursor.execute("ALTER TABLE bills ADD COLUMN payment_detail TEXT DEFAULT ''")
+
     conn.commit()
 
     # Seed initial data if empty
@@ -149,14 +159,14 @@ def seed_household_data(cursor):
 
     # Sample Bills
     cursor.executemany("""
-    INSERT INTO bills (name, amount, due_day, frequency, category, auto_pay, is_active, owner)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO bills (name, amount, due_day, frequency, category, auto_pay, is_active, owner, payment_method, payment_detail)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, [
-        ("Rent / Mortgage", 1850.00, 1, "Monthly", "Housing", 1, 1, "Shared / Household"),
-        ("Electric Utility", 120.00, 15, "Monthly", "Utilities", 1, 1, "Shared / Household"),
-        ("Internet (Fiber)", 80.00, 10, "Monthly", "Utilities", 1, 1, "Peter"),
-        ("Car Insurance", 145.00, 20, "Monthly", "Insurance", 1, 1, "Partner"),
-        ("Cloud Server Hosting", 45.00, 5, "Monthly", "Subscriptions", 1, 1, "Peter"),
+        ("Rent / Mortgage", 1850.00, 1, "Monthly", "Housing", 1, 1, "Shared / Household", "ACH / Checking", "Primary Checking (...4012)"),
+        ("Electric Utility", 120.00, 15, "Monthly", "Utilities", 1, 1, "Shared / Household", "ACH / Checking", "Primary Checking (...4012)"),
+        ("Internet (Fiber)", 80.00, 10, "Monthly", "Utilities", 1, 1, "Peter", "Credit Card", "Amex Gold"),
+        ("Car Insurance", 145.00, 20, "Monthly", "Insurance", 1, 1, "Partner", "Credit Card", "Chase Sapphire"),
+        ("Cloud Server Hosting", 45.00, 5, "Monthly", "Subscriptions", 1, 1, "Peter", "Credit Card", "Amex Gold"),
     ])
 
     # Sample Income
@@ -253,23 +263,23 @@ def delete_record(table, record_id):
     conn.commit()
     conn.close()
 
-def add_bill(name, amount, due_day, frequency, category, auto_pay, owner="Shared / Household", is_active=1, notes=""):
+def add_bill(name, amount, due_day, frequency, category, auto_pay, owner="Shared / Household", payment_method="ACH / Checking", payment_detail="", is_active=1, notes=""):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-    INSERT INTO bills (name, amount, due_day, frequency, category, auto_pay, owner, is_active, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (name, amount, due_day, frequency, category, auto_pay, owner, is_active, notes))
+    INSERT INTO bills (name, amount, due_day, frequency, category, auto_pay, owner, payment_method, payment_detail, is_active, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (name, amount, due_day, frequency, category, auto_pay, owner, payment_method, payment_detail, is_active, notes))
     conn.commit()
     conn.close()
 
-def update_bill(bill_id, name, amount, due_day, frequency, category, auto_pay, owner="Shared / Household", is_active=1, notes=""):
+def update_bill(bill_id, name, amount, due_day, frequency, category, auto_pay, owner="Shared / Household", payment_method="ACH / Checking", payment_detail="", is_active=1, notes=""):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-    UPDATE bills SET name=?, amount=?, due_day=?, frequency=?, category=?, auto_pay=?, owner=?, is_active=?, notes=?
+    UPDATE bills SET name=?, amount=?, due_day=?, frequency=?, category=?, auto_pay=?, owner=?, payment_method=?, payment_detail=?, is_active=?, notes=?
     WHERE id=?
-    """, (name, amount, due_day, frequency, category, auto_pay, owner, is_active, notes, bill_id))
+    """, (name, amount, due_day, frequency, category, auto_pay, owner, payment_method, payment_detail, is_active, notes, bill_id))
     conn.commit()
     conn.close()
 

@@ -210,12 +210,25 @@ with tab_bills:
                     frequency = st.selectbox("Frequency", ["Monthly", "Bi-Weekly", "Annual"])
                     category = st.selectbox("Category", bill_categories)
                     owner = st.selectbox("Assign to Person / Household", people_list)
+                    
+                    pay_method = st.selectbox("Payment Method", ["ACH / Checking Account", "Credit Card", "Debit Card", "Manual Check / Cash"])
+                    card_names = [c["name"] for c in raw_cards]
+                    if pay_method == "Credit Card" and card_names:
+                        pay_detail = st.selectbox("Linked Credit Card", card_names)
+                    elif pay_method == "ACH / Checking Account":
+                        pay_detail = st.text_input("Account Detail", value="Primary Checking Account", placeholder="e.g. Primary Checking (...4012)")
+                    else:
+                        pay_detail = st.text_input("Payment Details", placeholder="e.g. Card name, bank, or reference")
+
                     auto_pay = st.checkbox("Auto-Pay Enabled", value=False)
                     submitted = st.form_submit_button("Save Bill", icon=":material/add:")
 
                     if submitted and name and amount > 0:
-                        db.add_bill(name, amount, due_day, frequency, category, 1 if auto_pay else 0, owner=owner)
-                        st.success(f"Added bill '{name}' for {owner}!")
+                        db.add_bill(
+                            name, amount, due_day, frequency, category, 1 if auto_pay else 0,
+                            owner=owner, payment_method=pay_method, payment_detail=pay_detail
+                        )
+                        st.success(f"Added bill '{name}' ({pay_method}) for {owner}!")
                         st.rerun()
 
         # Display Existing Bills
@@ -224,7 +237,13 @@ with tab_bills:
                 with st.container(border=True):
                     c1, c2, c3 = st.columns([3, 2, 1])
                     owner_tag = f" | 👤 `{b.get('owner', 'Shared / Household')}`"
-                    c1.markdown(f"**{b['name']}**  \n`:material/calendar_today:` Due: Day {b['due_day']} | `{b['category']}`{owner_tag}")
+                    pm = b.get("payment_method", "ACH / Checking Account")
+                    pd_text = b.get("payment_detail", "")
+                    
+                    pm_icon = "💳" if "Credit" in pm or "Card" in pm else "🏦"
+                    pm_badge = f" | {pm_icon} `{pm}` ({pd_text})" if pd_text else f" | {pm_icon} `{pm}`"
+
+                    c1.markdown(f"**{b['name']}**  \n`:material/calendar_today:` Due: Day {b['due_day']} | `{b['category']}`{owner_tag}{pm_badge}")
                     c2.markdown(f"### ${b['amount']:,.2f}")
                     if b['auto_pay']:
                         c2.caption("⚡ Auto-Pay Active")
