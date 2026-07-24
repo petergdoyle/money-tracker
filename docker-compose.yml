@@ -11,3 +11,10 @@ services:
       - ./data:/app/data
     environment:
       - PYTHONUNBUFFERED=1
+    networks:
+      - proxy_network
+
+networks:
+  proxy_network:
+    external: true
+    name: proxy_network
